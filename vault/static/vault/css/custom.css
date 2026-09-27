@@ -1,0 +1,164 @@
+/* ==========================================================================
+   DocuVault AI — Custom Enterprise Stylesheet
+   Glassmorphism, hardware-accelerated animations, and accessibility controls.
+   ========================================================================== */
+
+/* --- Accessibility: Respect reduced motion preferences globally --- */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- Container Entrance Animation (One orchestrated rise per page load) --- */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise-in {
+  animation: rise-in 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+/* --- Folder-Tab Card: Geometric cut-corner evoking a physical filed record --- */
+.doc-card {
+  position: relative;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  transition: border-color 200ms ease, background-color 200ms ease, transform 160ms ease, box-shadow 200ms ease;
+}
+
+.doc-card:hover {
+  border-color: rgba(99, 102, 241, 0.5); /* Indigo accent */
+  background: rgba(30, 41, 59, 0.7);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+}
+
+.doc-card:active {
+  transform: scale(0.995);
+}
+
+/* Corner fold highlight on the cut tab */
+.doc-card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  background: rgba(99, 102, 241, 0.15);
+  border-bottom: 1px solid rgba(51, 65, 85, 0.8);
+  border-left: 1px solid rgba(51, 65, 85, 0.8);
+  pointer-events: none;
+}
+
+/* --- Live Status Pulse (Active during Gemini OCR / SharePoint sync) --- */
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.98);
+  }
+}
+
+.status-pulse {
+  animation: pulse-soft 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* --- Ingestion Progress Bar Fill --- */
+.progress-fill {
+  transition: width 350ms cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: width;
+}
+
+/* --- Modal Slide-up & Zoom Entrance --- */
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal-panel {
+  animation: modal-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+/* --- Toast Notification Slide-in --- */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.toast {
+  animation: toast-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+/* --- Drag-and-Drop Active Dropzone --- */
+.dropzone-active {
+  border-color: rgba(99, 102, 241, 0.9) !important;
+  background: rgba(30, 27, 75, 0.3) !important;
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.2) inset;
+}
+
+/* --- Accessible Keyboard Focus Indicators --- */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #6366f1 !important; /* Tailwind Indigo-500 */
+  outline-offset: 2px !important;
+}
+
+/* --- Subtle Ledger Divider --- */
+.ledger-rule {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(51, 65, 85, 0.8) 0%, rgba(51, 65, 85, 0.1) 80%, transparent 100%);
+}
+
+/* --- Dark Theme Custom Scrollbars --- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}

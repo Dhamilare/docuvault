@@ -1,0 +1,130 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — DocuVault AI Enterprise</title>
+
+  <!-- Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+    }
+  </style>
+</head>
+<body class="h-full flex items-center justify-center px-4 sm:px-6 relative overflow-hidden bg-slate-950">
+
+  <!-- Ambient Glow Effects -->
+  <div class="absolute -top-32 -left-32 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none"></div>
+  <div class="absolute -bottom-32 -right-32 w-96 h-96 bg-sky-600/10 rounded-full blur-3xl pointer-events-none"></div>
+
+  <div class="w-full max-w-md relative z-10 space-y-8">
+
+    <!-- Logo & Header -->
+    <div class="text-center">
+      <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-sky-400 p-[1px] shadow-2xl shadow-indigo-500/30 mb-4">
+        <div class="w-full h-full bg-slate-950 rounded-[15px] flex items-center justify-center">
+          <i data-lucide="layers" class="w-7 h-7 text-indigo-400"></i>
+        </div>
+      </div>
+      <h2 class="text-2xl font-extrabold text-white tracking-tight">DocuVault AI</h2>
+      <p class="mt-1.5 text-xs font-medium text-slate-400">
+        Autonomous Cognitive Document Classification &amp; SharePoint 365 Filing
+      </p>
+    </div>
+
+    <!-- Main Auth Card -->
+    <div class="glass-card rounded-3xl p-8 shadow-2xl border border-slate-800 space-y-6">
+      <div class="text-center space-y-1">
+        <h1 class="text-lg font-bold text-slate-100">Enterprise Authentication</h1>
+        <p class="text-xs text-slate-400">Sign in with your organization's Microsoft 365 account</p>
+      </div>
+
+      {% if error %}
+        <div class="px-4 py-3 rounded-xl text-xs font-semibold bg-rose-950/60 border border-rose-800 text-rose-300 flex items-center space-x-2.5">
+          <i data-lucide="alert-triangle" class="w-4 h-4 shrink-0"></i>
+          <span>{{ error }}</span>
+        </div>
+      {% endif %}
+
+      {% if auth_url %}
+        <a href="{{ auth_url }}"
+           class="w-full flex items-center justify-center space-x-3 py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm border border-slate-700/80 shadow-lg hover:border-slate-600 transition-all duration-200 active:scale-[0.98] group">
+          <!-- Microsoft 4-Color Logo SVG -->
+          <svg class="w-4 h-4 shrink-0" viewBox="0 0 21 21">
+            <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+            <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+            <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+            <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+          </svg>
+          <span class="group-hover:text-white">Sign in with Microsoft 365</span>
+        </a>
+      {% else %}
+        <a href="{% url 'login' %}" 
+           class="w-full inline-flex items-center justify-center py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition">
+          Try again
+        </a>
+      {% endif %}
+
+      <!-- Security Notice -->
+      <div class="pt-4 border-t border-slate-800/80 flex items-center space-x-2 text-[11px] text-slate-400 justify-center">
+        <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400 shrink-0"></i>
+        <span>OAuth 2.0 PKCE &amp; Entra ID token isolation protected</span>
+      </div>
+    </div>
+
+    <!-- Feature Pillars Footer -->
+    <div class="grid grid-cols-3 gap-3 text-center text-slate-400 text-[11px]">
+      <div class="p-2.5 rounded-xl bg-slate-900/50 border border-slate-800/60">
+        <i data-lucide="sparkles" class="w-4 h-4 text-indigo-400 mx-auto mb-1"></i>
+        <p class="font-medium text-slate-300">Open-Ended AI</p>
+        <p class="text-[10px] text-slate-500 mt-0.5">Gemini 2.5</p>
+      </div>
+      <div class="p-2.5 rounded-xl bg-slate-900/50 border border-slate-800/60">
+        <i data-lucide="cloud" class="w-4 h-4 text-emerald-400 mx-auto mb-1"></i>
+        <p class="font-medium text-slate-300">SharePoint 365</p>
+        <p class="text-[10px] text-slate-500 mt-0.5">Auto-filed</p>
+      </div>
+      <div class="p-2.5 rounded-xl bg-slate-900/50 border border-slate-800/60">
+        <i data-lucide="lock" class="w-4 h-4 text-sky-400 mx-auto mb-1"></i>
+        <p class="font-medium text-slate-300">Tenant SSO</p>
+        <p class="text-[10px] text-slate-500 mt-0.5">Entra ID</p>
+      </div>
+    </div>
+
+    <p class="text-center text-xs text-slate-500">
+      Access restricted to authenticated accounts within your organization's tenant.
+    </p>
+  </div>
+
+  <script>
+    if (window.lucide) {
+      lucide.createIcons();
+    }
+  </script>
+</body>
+</html>

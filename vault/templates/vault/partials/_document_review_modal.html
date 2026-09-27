@@ -1,0 +1,111 @@
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md" onclick="if(event.target===this) closeDocModal()">
+  <div class="glass-card rounded-2xl w-full max-w-lg p-6 border border-slate-700 shadow-2xl relative text-left">
+    
+    <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+          <i data-lucide="edit-3" class="w-4 h-4"></i>
+        </div>
+        <div>
+          <h3 class="text-sm font-bold text-slate-100">Review &amp; Verify Metadata</h3>
+          <p class="text-[11px] text-slate-400 truncate max-w-xs">{{ doc.original_filename }}</p>
+        </div>
+      </div>
+      <button onclick="closeDocModal()" class="text-slate-400 hover:text-white transition">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <form id="standalone-review-form" method="POST" action="{% url 'api_review_document' doc.pk %}" class="mt-4 space-y-4">
+      {% csrf_token %}
+      
+      <div>
+        <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+          Select Existing Category
+        </label>
+        {{ form.category }}
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+          Or Enter New Category Name
+        </label>
+        {{ form.new_category_name }}
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+            Company Name
+          </label>
+          {{ form.company_name }}
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+            Archive Year
+          </label>
+          {{ form.document_year }}
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+          Document Date
+        </label>
+        {{ form.document_date }}
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+          Summary
+        </label>
+        {{ form.ai_summary }}
+      </div>
+
+      <div class="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs">
+        <span class="text-slate-300">File directly to SharePoint upon saving</span>
+        {{ form.file_to_sharepoint_now }}
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button type="button" onclick="closeDocModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-medium transition">
+          Cancel
+        </button>
+        <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg transition">
+          Save &amp; Complete Verification
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+if (window.lucide) lucide.createIcons();
+
+(function () {
+  const form = document.getElementById("standalone-review-form");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.textContent = "Filing…";
+    const res = await fetch(form.action, {
+      method: "POST",
+      headers: { "X-CSRFToken": window.CSRF_TOKEN, "X-Requested-With": "XMLHttpRequest" },
+      body: new FormData(form),
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      dvToast("Metadata verified and filed.", "success");
+      closeDocModal();
+      if (typeof window.dvRefreshList === "function") window.dvRefreshList();
+      else location.reload();
+    } else {
+      dvToast(data.error || "Failed to update review.", "error");
+      btn.disabled = false;
+      btn.textContent = "Save & Complete Verification";
+    }
+  });
+})();
+</script>

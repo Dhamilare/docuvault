@@ -1,0 +1,86 @@
+{% extends "vault/base.html" %}
+{% load static %}
+
+{% block title %}Review Queue — DocuVault AI{% endblock %}
+
+{% block content %}
+<div class="space-y-6 animate-in fade-in duration-300">
+
+  <!-- Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div>
+      <div class="flex items-center space-x-2.5">
+        <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Review Queue</h1>
+        {% if items %}
+          <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+            {{ items|length }} awaiting check
+          </span>
+        {% endif %}
+      </div>
+      <p class="text-xs text-slate-400 mt-1">
+        Documents flagged due to low AI confidence or ambiguous metadata before SharePoint filing.
+      </p>
+    </div>
+  </div>
+
+  <!-- Review Cards Grid -->
+  <div class="grid grid-cols-1 gap-3.5">
+    {% for doc in items %}
+      <div class="glass-card rounded-2xl p-5 border border-amber-500/20 hover:border-amber-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        
+        <div class="min-w-0 space-y-1.5 flex-1">
+          <div class="flex items-center space-x-2.5">
+            <span class="p-1 rounded bg-amber-500/10 text-amber-400">
+              <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+            </span>
+            <p class="text-sm font-bold text-slate-100 truncate">{{ doc.original_filename }}</p>
+            <span class="text-[11px] text-slate-500 font-mono">({{ doc.formatted_size }})</span>
+          </div>
+
+          <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+            {{ doc.ai_summary|default:"No executive summary extracted." }}
+          </p>
+
+          <div class="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+            <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-medium">
+              Inferred Type: <strong class="text-indigo-400">{{ doc.category.name|default:"Unclassified" }}</strong>
+            </span>
+            <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-medium">
+              Company: <strong class="text-slate-100">{{ doc.company_name|default:"—" }}</strong>
+            </span>
+            {% if doc.confidence_score is not None %}
+              <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-amber-400 font-bold">
+                {{ doc.confidence_percent }}% confidence
+              </span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2.5 shrink-0 sm:self-center">
+          <button onclick="openDocModal({{ doc.pk }})"
+                  class="px-4 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center space-x-1.5 transition">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+            <span>Verify &amp; File</span>
+          </button>
+        </div>
+      </div>
+    {% empty %}
+      <div class="text-center py-20 glass-card rounded-3xl border border-slate-800">
+        <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mx-auto mb-3">
+          <i data-lucide="check-check" class="w-6 h-6"></i>
+        </div>
+        <h3 class="text-sm font-bold text-slate-200">Review queue is empty</h3>
+        <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+          All scanned documents cleared with high confidence and were auto-filed to SharePoint.
+        </p>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div id="modal-root"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'vault/js/documents.js' %}"></script>
+{% endblock %}

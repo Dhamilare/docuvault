@@ -1,0 +1,184 @@
+{% extends "vault/base.html" %}
+{% load static %}
+
+{% block title %}All Documents — DocuVault AI{% endblock %}
+
+{% block content %}
+<div class="space-y-5 sm:space-y-6 animate-in fade-in duration-300">
+
+  <!-- Page Header & New Scan Action -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+    <div>
+      <h1 class="text-xl sm:text-2xl md:text-3xl font-extrabold text-white tracking-tight">Document Repository</h1>
+      <p class="text-xs text-slate-400 mt-1">Search, inspect, and filter ingested scans and SharePoint-filed archives</p>
+    </div>
+    <div class="flex items-center space-x-3 shrink-0">
+      <a href="{% url 'upload' %}" 
+         class="w-full sm:w-auto inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition-all active:scale-95">
+        <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+        <span>Upload New Scan</span>
+      </a>
+    </div>
+  </div>
+
+  <!-- Interactive Filter Toolbar (Responsive Grid for Mobile, Tablet, and Desktop) -->
+  <div class="glass-card rounded-2xl p-3.5 sm:p-4 border border-slate-800 shadow-xl">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
+      
+      <!-- 1. Filename Search Input (Spans full width on mobile, 2 columns on tablet/desktop) -->
+      <div class="relative sm:col-span-2 lg:col-span-2">
+        <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"></i>
+        <input id="f-q" type="text" placeholder="Search filename..." value="{{ active_filters.q|default:'' }}"
+               class="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition">
+      </div>
+
+      <!-- 2. Status Filter Dropdown -->
+      <div class="relative">
+        <select id="f-status" 
+                class="w-full appearance-none px-3.5 py-2.5 pr-8 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition cursor-pointer">
+          <option value="">All Statuses</option>
+          {% for value, label in statuses %}
+            <option value="{{ value }}" {% if active_filters.status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <i data-lucide="chevron-down" class="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"></i>
+      </div>
+
+      <!-- 3. Discovered Category Filter Dropdown -->
+      <div class="relative">
+        <select id="f-category" 
+                class="w-full appearance-none px-3.5 py-2.5 pr-8 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition cursor-pointer">
+          <option value="">All Categories</option>
+          {% for cat in categories %}
+            <option value="{{ cat.pk }}" {% if active_filters.category == cat.pk|stringformat:"s" %}selected{% endif %}>{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+        <i data-lucide="chevron-down" class="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"></i>
+      </div>
+
+      <!-- 4. Company, Year & Reset Action Row (Combined for compact mobile footprint) -->
+      <div class="flex items-center space-x-2 sm:col-span-2 lg:col-span-1">
+        <!-- Company Search -->
+        <input id="f-company" type="text" placeholder="Company..." value="{{ active_filters.company|default:'' }}"
+               class="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition">
+        
+        <!-- Year Filter -->
+        <input id="f-year" type="number" placeholder="Year" value="{{ active_filters.year|default:'' }}"
+               class="w-16 sm:w-20 px-2 sm:px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition text-center">
+
+        <!-- Reset Button -->
+        <button type="button" onclick="dvClearFilters()" title="Reset all filters"
+                class="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700/80 transition shrink-0 active:scale-95">
+          <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Dynamic Table Container with Mobile-Ready Card Fallback -->
+  <div id="table-container" class="relative">
+    <!-- Loading Overlay -->
+    <div id="table-loading-overlay" class="hidden absolute inset-0 bg-slate-950/50 backdrop-blur-[2px] rounded-2xl z-20 flex items-center justify-center">
+      <div class="flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 text-xs font-semibold shadow-2xl">
+        <svg class="animate-spin w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span>Refreshing repository…</span>
+      </div>
+    </div>
+
+    <!-- Render initial partial table -->
+    {% include "vault/partials/_document_table.html" %}
+  </div>
+
+</div>
+
+<!-- Root container for dynamically loaded document modal -->
+<div id="modal-root"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'vault/js/documents.js' %}"></script>
+<script>
+  let dvPage = 1;
+
+  function dvBuildParams() {
+    const params = new URLSearchParams();
+    const q = document.getElementById("f-q").value.trim();
+    const status = document.getElementById("f-status").value;
+    const category = document.getElementById("f-category").value;
+    const company = document.getElementById("f-company").value.trim();
+    const year = document.getElementById("f-year").value.trim();
+
+    if (q) params.set("q", q);
+    if (status) params.set("status", status);
+    if (category) params.set("category", category);
+    if (company) params.set("company", company);
+    if (year) params.set("year", year);
+    if (dvPage > 1) params.set("page", dvPage);
+    return params;
+  }
+
+  async function dvRefreshList() {
+    const overlay = document.getElementById("table-loading-overlay");
+    if (overlay) overlay.classList.remove("hidden");
+
+    const url = "{% url 'document_list' %}?" + dvBuildParams().toString();
+    try {
+      const { data } = await dvFetch(url);
+      document.getElementById("table-container").innerHTML = data;
+      history.replaceState(null, "", url);
+      if (window.lucide) lucide.createIcons();
+    } catch (e) {
+      console.error("List refresh failed:", e);
+      if (typeof dvToast === "function") dvToast("Failed to refresh document list.", "error");
+    } finally {
+      if (overlay) overlay.classList.add("hidden");
+    }
+  }
+  window.dvRefreshList = dvRefreshList;
+
+  function dvGoToPage(page) {
+    dvPage = page;
+    dvRefreshList();
+  }
+
+  function dvClearFilters() {
+    document.getElementById("f-q").value = "";
+    document.getElementById("f-status").value = "";
+    document.getElementById("f-category").value = "";
+    document.getElementById("f-company").value = "";
+    document.getElementById("f-year").value = "";
+    dvPage = 1;
+    dvRefreshList();
+  }
+
+  // Input debouncing for smooth live-typing updates
+  let debounce;
+  ["f-q", "f-company", "f-year"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener("input", () => {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          dvPage = 1;
+          dvRefreshList();
+        }, 350);
+      });
+    }
+  });
+
+  // Dropdown instant change updates
+  ["f-status", "f-category"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener("change", () => {
+        dvPage = 1;
+        dvRefreshList();
+      });
+    }
+  });
+</script>
+{% endblock %}

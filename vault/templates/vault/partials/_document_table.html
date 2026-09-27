@@ -1,0 +1,168 @@
+{% load static %}
+<div class="glass-card rounded-2xl overflow-hidden border border-slate-800 shadow-xl">
+
+  <!-- ================= Mobile View: Touch Cards (Hidden on sm screens and up) ================= -->
+  <div class="sm:hidden divide-y divide-slate-800/80">
+    {% for doc in page_obj %}
+      <div class="p-4 hover:bg-slate-900/50 cursor-pointer transition active:bg-slate-900" onclick="openDocModal({{ doc.pk }})">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex items-center space-x-2.5 min-w-0">
+            <div class="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
+              {% if doc.file_extension == '.pdf' %}
+                <i data-lucide="file-text" class="w-4 h-4 text-rose-400"></i>
+              {% elif doc.file_extension in '.png,.jpg,.jpeg,.webp' %}
+                <i data-lucide="image" class="w-4 h-4 text-sky-400"></i>
+              {% else %}
+                <i data-lucide="file" class="w-4 h-4 text-indigo-400"></i>
+              {% endif %}
+            </div>
+            <div class="min-w-0">
+              <p class="font-bold text-xs text-slate-100 truncate">{{ doc.original_filename }}</p>
+              <p class="text-[10px] text-slate-400 mt-0.5">{{ doc.formatted_size }} · {{ doc.created_at|date:"M j" }}</p>
+            </div>
+          </div>
+
+          <!-- Status badge -->
+          <div class="shrink-0">
+            {% if doc.status == 'filed' %}
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Filed</span>
+            {% elif doc.status == 'needs_review' %}
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">Review</span>
+            {% elif doc.status == 'failed' %}
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">Failed</span>
+            {% else %}
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">Active</span>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="mt-2.5 flex items-center justify-between text-[11px] text-slate-400 bg-slate-950/50 px-2.5 py-1.5 rounded-lg border border-slate-800/60">
+          <span class="truncate"><strong>Org:</strong> {{ doc.company_name|default:"—" }}</span>
+          <span class="text-indigo-400 font-medium shrink-0 ml-2">{{ doc.category.name|default:"Unclassified" }}</span>
+        </div>
+      </div>
+    {% empty %}
+      <div class="p-8 text-center text-xs text-slate-400">No documents found.</div>
+    {% endfor %}
+  </div>
+
+  <!-- ================= Desktop View: Full Table (Hidden on mobile) ================= -->
+  <div class="hidden sm:block overflow-x-auto">
+    <table class="w-full text-left border-collapse text-sm">
+      <thead>
+        <tr class="border-b border-slate-800 bg-slate-900/70 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+          <th class="px-5 py-3.5">Document File</th>
+          <th class="px-4 py-3.5">Category</th>
+          <th class="px-4 py-3.5">Company</th>
+          <th class="px-4 py-3.5">Year</th>
+          <th class="px-4 py-3.5">Status</th>
+          <th class="px-4 py-3.5">Confidence</th>
+          <th class="px-5 py-3.5 text-right">Uploaded</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-800/80">
+        {% for doc in page_obj %}
+          <tr class="hover:bg-slate-900/40 cursor-pointer transition-colors group" onclick="openDocModal({{ doc.pk }})">
+            <td class="px-5 py-4">
+              <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700/80 flex items-center justify-center shrink-0 text-slate-300 group-hover:border-indigo-500/50 transition">
+                  {% if doc.file_extension == '.pdf' %}
+                    <i data-lucide="file-text" class="w-4 h-4 text-rose-400"></i>
+                  {% elif doc.file_extension in '.png,.jpg,.jpeg,.webp' %}
+                    <i data-lucide="image" class="w-4 h-4 text-sky-400"></i>
+                  {% else %}
+                    <i data-lucide="file" class="w-4 h-4 text-indigo-400"></i>
+                  {% endif %}
+                </div>
+                <div class="min-w-0 max-w-[180px] md:max-w-xs">
+                  <span class="font-semibold text-slate-100 group-hover:text-indigo-400 transition truncate block">
+                    {{ doc.original_filename }}
+                  </span>
+                  <span class="text-[11px] text-slate-500">{{ doc.formatted_size }}</span>
+                </div>
+              </div>
+            </td>
+
+            <td class="px-4 py-4">
+              {% if doc.category %}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-indigo-500/10 text-indigo-300 border-indigo-500/20">
+                  {{ doc.category.name }}
+                </span>
+              {% else %}
+                <span class="text-xs text-slate-500 italic">Uncategorized</span>
+              {% endif %}
+            </td>
+
+            <td class="px-4 py-4 text-slate-300 font-medium truncate max-w-[140px]">
+              {{ doc.company_name|default:"—" }}
+            </td>
+
+            <td class="px-4 py-4 text-xs text-slate-400 font-mono">
+              {{ doc.document_year|default:"—" }}
+            </td>
+
+            <td class="px-4 py-4">
+              {% if doc.status == 'filed' %}
+                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                  <span>Filed</span>
+                </span>
+              {% elif doc.status == 'needs_review' %}
+                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+                  <span>Review</span>
+                </span>
+              {% elif doc.status == 'failed' %}
+                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                  <i data-lucide="x-circle" class="w-3.5 h-3.5"></i>
+                  <span>Failed</span>
+                </span>
+              {% else %}
+                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20 animate-pulse">
+                  <span>Processing</span>
+                </span>
+              {% endif %}
+            </td>
+
+            <td class="px-4 py-4">
+              {% if doc.confidence_score is not None %}
+                <span class="text-xs font-bold {% if doc.confidence_score >= 0.8 %}text-emerald-400{% elif doc.confidence_score >= 0.6 %}text-amber-400{% else %}text-rose-400{% endif %}">
+                  {{ doc.confidence_percent }}%
+                </span>
+              {% else %}
+                <span class="text-xs text-slate-500">—</span>
+              {% endif %}
+            </td>
+
+            <td class="px-5 py-4 text-xs text-slate-400 text-right">
+              {{ doc.created_at|date:"M j, Y" }}
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="7" class="px-4 py-12 text-center text-xs text-slate-400">No documents match these filters.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Responsive Pagination Controls -->
+{% if page_obj.has_other_pages %}
+  <div class="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 px-1 text-xs text-slate-400">
+    <span>Page <strong class="text-slate-200">{{ page_obj.number }}</strong> of {{ page_obj.paginator.num_pages }}</span>
+    <div class="flex items-center space-x-2 w-full sm:w-auto justify-between sm:justify-end">
+      {% if page_obj.has_previous %}
+        <button onclick="dvGoToPage({{ page_obj.previous_page_number }})" class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200">
+          Previous
+        </button>
+      {% endif %}
+      {% if page_obj.has_next %}
+        <button onclick="dvGoToPage({{ page_obj.next_page_number }})" class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200">
+          Next
+        </button>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

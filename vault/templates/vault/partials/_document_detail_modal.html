@@ -1,0 +1,255 @@
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md transition-opacity duration-300" onclick="if(event.target===this) closeDocModal()">
+  <div class="glass-card rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-700/80 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+
+    <!-- Modal Header -->
+    <div class="flex items-start justify-between gap-3 px-6 py-5 border-b border-slate-800 bg-slate-900/50">
+      <div class="min-w-0">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+            <i data-lucide="file-text" class="w-4 h-4"></i>
+          </div>
+          <p class="font-bold text-base text-slate-100 truncate max-w-md">{{ doc.original_filename }}</p>
+        </div>
+        <p class="text-xs text-slate-400 mt-1 pl-10.5">
+          Uploaded {{ doc.created_at|date:"M j, Y · H:i" }}{% if doc.uploaded_by %} by <span class="text-slate-300 font-medium">{{ doc.uploaded_by.first_name|default:doc.uploaded_by.username }}</span>{% endif %}
+          · <span class="text-slate-400">{{ doc.formatted_size }}</span>
+        </p>
+      </div>
+      <button onclick="closeDocModal()" aria-label="Close" class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Modal Body -->
+    <div class="px-6 py-6 space-y-6 overflow-y-auto custom-scrollbar flex-1">
+
+      <!-- Status & Confidence Banner -->
+      <div class="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-900/70 border border-slate-800">
+        <div class="flex items-center space-x-2">
+          {% if doc.status == 'filed' %}
+            <span class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
+              <span>Filed in SharePoint</span>
+            </span>
+          {% elif doc.status == 'needs_review' %}
+            <span class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+              <span>Needs Review</span>
+            </span>
+          {% elif doc.status == 'failed' %}
+            <span class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <i data-lucide="x-circle" class="w-3.5 h-3.5"></i>
+              <span>Failed</span>
+            </span>
+          {% else %}
+            <span class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+              <svg class="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+              <span>Processing</span>
+            </span>
+          {% endif %}
+
+          {% if doc.category %}
+            <span class="px-2.5 py-0.5 rounded-full text-xs font-medium border bg-indigo-500/10 text-indigo-300 border-indigo-500/20">
+              {{ doc.category.name }}
+            </span>
+          {% endif %}
+        </div>
+
+        {% if doc.confidence_score is not None %}
+          <div class="flex items-center space-x-2 text-xs">
+            <span class="text-slate-400 font-medium">Confidence:</span>
+            <div class="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div class="h-full rounded-full {% if doc.confidence_score >= 0.8 %}bg-emerald-500{% elif doc.confidence_score >= 0.6 %}bg-amber-500{% else %}bg-rose-500{% endif %}" style="width: {{ doc.confidence_percent }}%;"></div>
+            </div>
+            <span class="font-bold {% if doc.confidence_score >= 0.8 %}text-emerald-400{% elif doc.confidence_score >= 0.6 %}text-amber-400{% else %}text-rose-400{% endif %}">
+              {{ doc.confidence_percent }}%
+            </span>
+          </div>
+        {% endif %}
+      </div>
+
+      {% if doc.error_message %}
+        <div class="text-xs font-medium text-rose-300 bg-rose-950/40 border border-rose-800/80 rounded-xl p-3.5 flex items-start space-x-2.5">
+          <i data-lucide="alert-octagon" class="w-4 h-4 shrink-0 text-rose-400 mt-0.5"></i>
+          <span>{{ doc.error_message }}</span>
+        </div>
+      {% endif %}
+
+      <!-- Executive AI Summary -->
+      {% if doc.ai_summary %}
+        <div class="p-4 rounded-xl bg-slate-900/50 border border-slate-800 space-y-1.5">
+          <div class="flex items-center space-x-2 text-xs font-bold uppercase tracking-wider text-indigo-400">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+            <span>Executive AI Summary</span>
+          </div>
+          <p class="text-xs text-slate-300 leading-relaxed">{{ doc.ai_summary }}</p>
+        </div>
+      {% endif %}
+
+      <!-- Review Form (when needs review or failed) -->
+      {% if doc.status == 'needs_review' or doc.status == 'failed' %}
+        <form id="review-form" class="space-y-4 p-5 rounded-xl border border-amber-500/30 bg-slate-900/60 shadow-inner">
+          <div class="flex items-center space-x-2 text-xs font-bold uppercase tracking-wider text-amber-400 mb-1">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+            <span>Verify &amp; Confirm Before SharePoint Filing</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Document Category</label>
+              <input name="category_name" value="{{ doc.category.name|default:'' }}" required
+                     placeholder="e.g., Vendor Invoice"
+                     class="w-full text-xs bg-slate-950 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Company / Organization</label>
+              <input name="company_name" value="{{ doc.company_name }}" required
+                     placeholder="e.g., Acme Corporation"
+                     class="w-full text-xs bg-slate-950 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Formal Date (Optional)</label>
+              <input name="document_date" type="date" value="{{ doc.document_date|date:'Y-m-d' }}"
+                     class="w-full text-xs bg-slate-950 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Archive Year</label>
+              <input name="document_year" type="number" value="{{ doc.document_year|default:'' }}" required min="1900" max="2100"
+                     class="w-full text-xs bg-slate-950 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500">
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+            <button type="button" onclick="deleteDoc({{ doc.pk }})" class="text-xs text-rose-400 hover:text-rose-300 font-semibold px-3 py-2 rounded-xl hover:bg-rose-950/30 transition flex items-center space-x-1.5">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span>Discard Document</span>
+            </button>
+
+            <button type="submit" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl shadow-lg shadow-indigo-600/30 transition flex items-center space-x-2">
+              <i data-lucide="cloud-upload" class="w-3.5 h-3.5"></i>
+              <span>Confirm &amp; File to SharePoint</span>
+            </button>
+          </div>
+        </form>
+
+      <!-- Filed Overview Data Card -->
+      {% elif doc.status == 'filed' %}
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs">
+          <div>
+            <span class="text-[10px] uppercase font-semibold text-slate-500 block">Category</span>
+            <span class="font-bold text-slate-200 mt-0.5 block truncate">{{ doc.category.name|default:"—" }}</span>
+          </div>
+          <div>
+            <span class="text-[10px] uppercase font-semibold text-slate-500 block">Company</span>
+            <span class="font-bold text-slate-200 mt-0.5 block truncate">{{ doc.company_name|default:"—" }}</span>
+          </div>
+          <div>
+            <span class="text-[10px] uppercase font-semibold text-slate-500 block">Year</span>
+            <span class="font-bold text-slate-200 mt-0.5 block">{{ doc.document_year|default:"—" }}</span>
+          </div>
+          <div>
+            <span class="text-[10px] uppercase font-semibold text-slate-500 block">SharePoint Path</span>
+            <span class="font-mono text-slate-300 mt-0.5 block truncate" title="{{ doc.sharepoint_folder_path }}">{{ doc.sharepoint_folder_path|default:"—" }}</span>
+          </div>
+        </div>
+
+        {% if doc.sharepoint_web_url %}
+          <div class="flex items-center justify-end">
+            <a href="{{ doc.sharepoint_web_url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow-lg transition">
+              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+              <span>Open in SharePoint 365</span>
+            </a>
+          </div>
+        {% endif %}
+      {% endif %}
+
+      <!-- Discovered Key Entities (if available) -->
+      {% if doc.extracted_entities %}
+        <div class="space-y-2">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-400 block">Discovered Key Entities</span>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {% for k, v in doc.extracted_entities.items %}
+              <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs">
+                <span class="text-slate-500 font-mono text-[10px] uppercase block truncate">{{ k }}</span>
+                <span class="font-semibold text-slate-200 truncate block">{{ v }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- Extracted Text Collapsible -->
+      {% if doc.extracted_text_excerpt %}
+        <details class="text-xs group border border-slate-800 rounded-xl bg-slate-900/40 overflow-hidden">
+          <summary class="px-4 py-3 cursor-pointer text-slate-400 hover:text-slate-200 font-semibold flex items-center justify-between transition">
+            <div class="flex items-center space-x-2">
+              <i data-lucide="file-code" class="w-3.5 h-3.5 text-indigo-400"></i>
+              <span>View OCR / Extracted Text</span>
+            </div>
+            <i data-lucide="chevron-down" class="w-4 h-4 group-open:rotate-180 transition-transform"></i>
+          </summary>
+          <div class="p-4 pt-0 border-t border-slate-800/80">
+            <pre class="mt-3 text-[11px] font-mono text-slate-300 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto custom-scrollbar p-3 rounded-lg bg-slate-950/80 border border-slate-800/80">{{ doc.extracted_text_excerpt }}</pre>
+          </div>
+        </details>
+      {% endif %}
+    </div>
+
+    <!-- Modal Footer -->
+    <div class="px-6 py-4 border-t border-slate-800 bg-slate-900/50 flex justify-end">
+      <button type="button" onclick="closeDocModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition">
+        Close
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+if (window.lucide) {
+  lucide.createIcons();
+}
+
+(function () {
+  const form = document.getElementById("review-form");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `
+      <svg class="animate-spin w-3.5 h-3.5 inline mr-1" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+      Filing to SharePoint…
+    `;
+    const { status, data } = await dvFetch("{% url 'api_review_document' doc.pk %}", {
+      method: "POST",
+      body: new FormData(form),
+    });
+    if (status === 200 && data.ok) {
+      dvToast(data.status === "filed" ? "Document filed to SharePoint." : "Saved.", "success");
+      closeDocModal();
+      if (typeof window.dvRefreshList === "function") window.dvRefreshList();
+      else location.reload();
+    } else {
+      dvToast(data.error || "Couldn't save changes.", "error");
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `<span>Confirm &amp; File to SharePoint</span>`;
+    }
+  });
+})();
+
+async function deleteDoc(docId) {
+  if (!confirm("Discard this document? This cannot be undone.")) return;
+  const { status, data } = await dvFetch(`/api/documents/${docId}/delete/`, { method: "POST" });
+  if (status === 200 && data.ok) {
+    dvToast("Document discarded.", "success");
+    closeDocModal();
+    if (typeof window.dvRefreshList === "function") window.dvRefreshList();
+    else location.reload();
+  } else {
+    dvToast((data && data.error) || "Couldn't discard this document.", "error");
+  }
+}
+</script>
