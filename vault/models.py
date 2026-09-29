@@ -323,7 +323,7 @@ class SystemConfiguration(models.Model):
         max_length=255,
         default="/Documents/{company_name}/{document_year}/{category_name}",
     )
-    gemini_model = models.CharField(max_length=60, default="gemini-2.5-flash")
+    gemini_model = models.CharField(max_length=60, default="gemini-3.8-flash")
     delete_local_on_file = models.BooleanField(
         default=True,
         help_text="Delete temporary local file immediately after verified upload to SharePoint.",

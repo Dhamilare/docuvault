@@ -101,7 +101,7 @@ GRAPH_SCOPES = ["https://graph.microsoft.com/.default"]
 
 # --- Gemini Configuration ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 GEMINI_MAX_RETRIES = int(os.environ.get("GEMINI_MAX_RETRIES", "3"))
 
 # --- App Pipeline Rules ---

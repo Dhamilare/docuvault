@@ -1,10 +1,12 @@
 /**
- * DocuVault AI — Core Client Engine
- * Handles CSRF injection, standard fetch wrapper, animated Toast notifications,
- * and global document operations (discard / delete).
+ * DocuVault AI — Unified Client Engine (app.js)
+ * Loaded globally on every page via base.html.
  */
 
-// Helper to reliably extract Django CSRF cookie
+// =============================================================================
+// 1. CSRF & Network Layer
+// =============================================================================
+
 function getCsrfToken() {
   if (window.CSRF_TOKEN) return window.CSRF_TOKEN;
 
@@ -52,11 +54,37 @@ async function dvFetch(url, options = {}) {
     throw err;
   }
 }
+window.dvFetch = dvFetch;
 
-// Global Discard Document action
-window.discardDocument = async function (docId) {
-  if (!confirm("Are you sure you want to discard this document? The local temporary scan will be permanently deleted.")) {
+// =============================================================================
+// 2. Global Document Delete / Discard (Fixes deleteDoc is not defined)
+// =============================================================================
+
+async function deleteDoc(target, optionalId) {
+  let docId = optionalId;
+  let element = null;
+
+  if (typeof target === "number" || typeof target === "string") {
+    docId = target;
+  } else if (target && target.nodeType) {
+    element = target;
+    docId = optionalId || target.dataset.id || target.dataset.docId;
+  }
+
+  if (!docId) {
+    console.error("deleteDoc: No document ID provided.");
     return;
+  }
+
+  if (!confirm("Are you sure you want to discard this document? The file will be permanently removed.")) {
+    return;
+  }
+
+  const btn = element ? element.closest("button") : null;
+  const originalHtml = btn ? btn.innerHTML : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="animate-pulse text-rose-400">Discarding…</span>`;
   }
 
   try {
@@ -67,16 +95,18 @@ window.discardDocument = async function (docId) {
     if (ok && data.ok) {
       dvToast("Document discarded successfully.", "info");
 
-      // 1. Close inspection/review modal if open
-      if (typeof closeDocModal === "function") {
-        closeDocModal();
-      }
+      // 1. Close modal if open
+      closeDocModal();
 
-      // 2. Remove document rows/cards from the DOM across queues, dropzones, and tables
-      const targets = document.querySelectorAll(
-        `[data-doc-id="${docId}"], [data-id="${docId}"], #doc-row-${docId}, tr[data-document-id="${docId}"]`
-      );
-      targets.forEach((el) => {
+      // 2. Remove document rows/cards from DOM
+      const selectors = [
+        `[data-doc-id="${docId}"]`,
+        `[data-id="${docId}"]`,
+        `#doc-row-${docId}`,
+        `#doc-card-${docId}`,
+        `tr[data-document-id="${docId}"]`
+      ];
+      document.querySelectorAll(selectors.join(",")).forEach((el) => {
         el.classList.add("opacity-0", "scale-95", "transition-all", "duration-200");
         setTimeout(() => el.remove(), 200);
       });
@@ -92,13 +122,165 @@ window.discardDocument = async function (docId) {
         }
       }
     } else {
-      dvToast(data.error || "Failed to discard document.", "error");
+      const errMsg = (data && data.error) ? data.error : "Failed to discard document.";
+      dvToast(errMsg, "error");
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
     }
   } catch (err) {
-    console.error("Discard error:", err);
-    dvToast("An error occurred while discarding the document.", "error");
+    console.error("deleteDoc failed:", err);
+    dvToast("Network error while discarding document.", "error");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
   }
-};
+}
+window.deleteDoc = deleteDoc;
+window.discardDocument = deleteDoc;
+window.deleteDocument = deleteDoc;
+
+// =============================================================================
+// 3. Modal Controllers
+// =============================================================================
+
+function getModalRoot() {
+  return document.getElementById("modal-container") || document.getElementById("modal-root");
+}
+
+function showModalLoading(text) {
+  const root = getModalRoot();
+  if (!root) return;
+
+  root.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+      <div class="glass-card rounded-2xl px-6 py-4 flex items-center space-x-3 text-slate-300 text-xs font-semibold shadow-2xl border border-slate-700">
+        <svg class="animate-spin w-4 h-4 text-indigo-400" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+        </svg>
+        <span>${text}</span>
+      </div>
+    </div>
+  `;
+  root.classList.remove("hidden");
+  root.classList.add("flex");
+  document.body.style.overflow = "hidden";
+}
+
+function closeDocModal() {
+  const root = getModalRoot();
+  if (root) {
+    root.innerHTML = "";
+    root.classList.add("hidden");
+    root.classList.remove("flex");
+  }
+  document.body.style.overflow = "";
+}
+window.closeDocModal = closeDocModal;
+
+// Telemetry & Logs Inspector
+async function openDocModal(docId) {
+  const root = getModalRoot();
+  if (!root) return;
+
+  showModalLoading("Loading cognitive document telemetry…");
+
+  try {
+    const res = await fetch(`/api/documents/${docId}/detail/`, {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    });
+
+    if (!res.ok) {
+      dvToast("Failed to load document details.", "error");
+      closeDocModal();
+      return;
+    }
+
+    root.innerHTML = await res.text();
+    if (window.lucide) lucide.createIcons();
+  } catch (err) {
+    dvToast("Network error fetching document details.", "error");
+    closeDocModal();
+  }
+}
+window.openDocModal = openDocModal;
+
+// Verification & SharePoint Filing Modal
+async function openReviewModal(docId) {
+  const root = getModalRoot();
+  if (!root) return;
+
+  showModalLoading("Opening document review workspace…");
+
+  try {
+    const res = await fetch(`/api/documents/${docId}/review/`, {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    });
+
+    if (!res.ok) {
+      dvToast("Failed to load review form.", "error");
+      closeDocModal();
+      return;
+    }
+
+    root.innerHTML = await res.text();
+    if (window.lucide) lucide.createIcons();
+
+    // Attach AJAX submit handler to the review form
+    const form = root.querySelector("#review-doc-form");
+    if (form) {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const origText = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<span>Uploading to SharePoint…</span>`;
+
+        const formData = new FormData(form);
+        try {
+          const { status, data, ok } = await dvFetch(form.action, {
+            method: "POST",
+            body: formData,
+          });
+
+          if (ok && data.ok) {
+            dvToast("Document successfully filed to SharePoint.", "success");
+            closeDocModal();
+
+            // Remove card or reload list
+            const row = document.querySelector(`[data-doc-id="${docId}"], #doc-card-${docId}`);
+            if (row) row.remove();
+            if (typeof dvRefreshList === "function") dvRefreshList();
+          } else {
+            dvToast(data.error || "SharePoint filing failed.", "error");
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = origText;
+          }
+        } catch (err) {
+          dvToast("Network error filing document.", "error");
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = origText;
+        }
+      });
+    }
+  } catch (err) {
+    dvToast("Network error opening review modal.", "error");
+    closeDocModal();
+  }
+}
+window.openReviewModal = openReviewModal;
+
+// Close modal with Escape key
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeDocModal();
+});
+
+// =============================================================================
+// 4. Toast Notifications
+// =============================================================================
 
 function dvToast(message, variant = "info") {
   const host = document.getElementById("toast-host");
@@ -145,3 +327,4 @@ function dvToast(message, variant = "info") {
     }
   }, 5500);
 }
+window.dvToast = dvToast;
