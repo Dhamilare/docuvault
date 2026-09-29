@@ -1,8 +1,11 @@
 /**
- * DocuVault AI — Documents & Review Queue Controller
+ * DocuVault AI — Documents & Review Queue Controller (documents.js)
  */
 
+// =============================================================================
 // 1. CSRF Helper
+// =============================================================================
+
 function getCsrfToken() {
   if (window.CSRF_TOKEN) return window.CSRF_TOKEN;
   if (document.cookie && document.cookie !== "") {
@@ -17,7 +20,10 @@ function getCsrfToken() {
   return document.querySelector("[name=csrfmiddlewaretoken]")?.value || "";
 }
 
+// =============================================================================
 // 2. Universal Fetch Wrapper
+// =============================================================================
+
 async function dvFetch(url, options = {}) {
   const opts = {
     method: options.method || "GET",
@@ -44,7 +50,10 @@ async function dvFetch(url, options = {}) {
 }
 window.dvFetch = dvFetch;
 
-// 3. Global Delete / Discard Document (Fixes deleteDoc is not defined)
+// =============================================================================
+// 3. Global Delete / Discard Document (deleteDoc)
+// =============================================================================
+
 async function deleteDoc(target, optionalId) {
   let docId = optionalId;
   let element = null;
@@ -127,9 +136,12 @@ async function deleteDoc(target, optionalId) {
 window.deleteDoc = deleteDoc;
 window.discardDocument = deleteDoc;
 
+// =============================================================================
 // 4. Modal Handlers
+// =============================================================================
+
 function getModalRoot() {
-  return document.getElementById("modal-root") || document.getElementById("modal-container");
+  return document.getElementById("modal-container") || document.getElementById("modal-root");
 }
 
 function showModalLoading(text) {
@@ -219,7 +231,7 @@ async function openReviewModal(docId) {
         const submitBtn = form.querySelector('button[type="submit"]');
         const origText = submitBtn.innerHTML;
         submitBtn.disabled = true;
-        submitBtn.innerHTML = `<span>Uploading to SharePoint…</span>`;
+        submitBtn.innerHTML = `<span>Uploading &amp; Syncing ECM to SharePoint…</span>`;
 
         const formData = new FormData(form);
         try {
@@ -230,7 +242,7 @@ async function openReviewModal(docId) {
 
           if (ok && data.ok) {
             closeDocModal();
-            // Remove filed item from DOM or refresh
+            // Remove filed item from DOM or refresh list
             const item = document.querySelector(`[data-doc-id="${docId}"], #doc-card-${docId}`);
             if (item) item.remove();
             if (typeof dvRefreshList === "function") dvRefreshList();
@@ -257,3 +269,144 @@ window.openReviewModal = openReviewModal;
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDocModal();
 });
+
+// =============================================================================
+// 5. Bulk Operations in Review Queue
+// =============================================================================
+
+window.initBulkReviewQueue = function () {
+  const selectAll = document.getElementById("select-all-queue");
+  const checkboxes = document.querySelectorAll(".doc-checkbox");
+  const bulkBar = document.getElementById("bulk-actions-bar");
+  const selectedCountEl = document.getElementById("bulk-selected-count");
+
+  if (!checkboxes.length || !bulkBar) return;
+
+  function updateBulkState() {
+    const selected = Array.from(checkboxes).filter((c) => c.checked);
+    const count = selected.length;
+
+    if (count > 0) {
+      bulkBar.classList.remove("hidden");
+      bulkBar.classList.add("flex");
+      if (selectedCountEl) selectedCountEl.textContent = `${count} selected`;
+    } else {
+      bulkBar.classList.add("hidden");
+      bulkBar.classList.remove("flex");
+    }
+
+    if (selectAll) {
+      selectAll.checked = count === checkboxes.length && checkboxes.length > 0;
+    }
+  }
+
+  if (selectAll) {
+    selectAll.addEventListener("change", (e) => {
+      checkboxes.forEach((c) => (c.checked = e.target.checked));
+      updateBulkState();
+    });
+  }
+
+  checkboxes.forEach((c) => c.addEventListener("change", updateBulkState));
+};
+
+window.bulkFileSelected = async function () {
+  const selectedBoxes = document.querySelectorAll(".doc-checkbox:checked");
+  const docIds = Array.from(selectedBoxes).map((c) => parseInt(c.value, 10));
+
+  if (!docIds.length) return;
+
+  if (!confirm(`Are you sure you want to approve and file ${docIds.length} document(s) directly to SharePoint?`)) {
+    return;
+  }
+
+  const btn = document.getElementById("btn-bulk-file");
+  const origText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="animate-pulse">Filing ${docIds.length} items…</span>`;
+  }
+
+  try {
+    const { data, ok } = await dvFetch("/api/documents/bulk-file/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_ids: docIds }),
+    });
+
+    if (ok && data.ok) {
+      if (typeof dvToast === "function") {
+        dvToast(`Filed ${data.filed_count} document(s) to SharePoint.`, "success");
+      }
+      docIds.forEach((id) => {
+        const card = document.getElementById(`doc-card-${id}`);
+        if (card) {
+          card.classList.add("opacity-0", "scale-95", "transition-all", "duration-200");
+          setTimeout(() => card.remove(), 200);
+        }
+      });
+      setTimeout(() => window.location.reload(), 800);
+    } else {
+      alert((data && data.error) || "Bulk filing experienced errors.");
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+  } catch (err) {
+    alert("Network error during bulk filing.");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+  }
+};
+
+window.bulkDiscardSelected = async function () {
+  const selectedBoxes = document.querySelectorAll(".doc-checkbox:checked");
+  const docIds = Array.from(selectedBoxes).map((c) => parseInt(c.value, 10));
+
+  if (!docIds.length) return;
+
+  if (!confirm(`Are you sure you want to discard ${docIds.length} document(s)? Local scans will be permanently deleted.`)) {
+    return;
+  }
+
+  const btn = document.getElementById("btn-bulk-discard");
+  const origText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="animate-pulse">Discarding…</span>`;
+  }
+
+  try {
+    const { data, ok } = await dvFetch("/api/documents/bulk-discard/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_ids: docIds }),
+    });
+
+    if (ok && data.ok) {
+      if (typeof dvToast === "function") {
+        dvToast(`Discarded ${data.discarded_count} document(s).`, "info");
+      }
+      docIds.forEach((id) => {
+        const card = document.getElementById(`doc-card-${id}`);
+        if (card) card.remove();
+      });
+      setTimeout(() => window.location.reload(), 800);
+    } else {
+      alert((data && data.error) || "Bulk discard failed.");
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+  } catch (err) {
+    alert("Network error during bulk discard.");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origText;
+    }
+  }
+};

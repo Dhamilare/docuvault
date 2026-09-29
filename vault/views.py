@@ -18,6 +18,7 @@ from .services import document_processor, msal_auth
 from django.views.decorators.http import require_http_methods
 logger = logging.getLogger("vault")
 User = get_user_model()
+import json
 
 # ==============================================================================
 # 1. MSAL / Microsoft 365 Authentication
@@ -387,6 +388,53 @@ def api_retry_document(request, pk):
 
 
 @login_required
+@require_POST
+def api_bulk_file(request):
+    """
+    Bulk Operation: Files multiple selected documents to SharePoint using verified or AI-inferred metadata.
+    """
+    try:
+        payload = json.loads(request.body)
+        doc_ids = payload.get("document_ids", [])
+    except Exception:
+        doc_ids = request.POST.getlist("document_ids[]")
+
+    if not doc_ids:
+        return JsonResponse({"ok": False, "error": "No documents selected."}, status=400)
+
+    # Limit batch size to protect system resources
+    doc_ids = doc_ids[:25]
+    documents = Document.objects.filter(pk__in=doc_ids, status__in=[Document.Status.NEEDS_REVIEW, Document.Status.FAILED])
+
+    filed_count = 0
+    failed_count = 0
+    errors = []
+
+    for doc in documents:
+        # Fallback values if metadata was missing
+        if not doc.category:
+            doc.category = DocumentCategory.get_or_create_discovered("General Document")
+        if not doc.company_name:
+            doc.company_name = "Unsorted"
+        if not doc.document_year:
+            doc.document_year = timezone.now().year
+        doc.save()
+
+        success, err = document_processor.file_reviewed_document(doc, actor=request.user)
+        if success:
+            filed_count += 1
+        else:
+            failed_count += 1
+            errors.append(f"{doc.original_filename}: {err}")
+
+    return JsonResponse({
+        "ok": True,
+        "filed_count": filed_count,
+        "failed_count": failed_count,
+        "errors": errors,
+    })
+
+@login_required
 @require_http_methods(["POST", "DELETE"])
 def api_delete_document(request, pk):
     document = get_object_or_404(Document, pk=pk)
@@ -403,3 +451,33 @@ def api_delete_document(request, pk):
     document.delete()
 
     return JsonResponse({"ok": True, "id": doc_id, "message": "Document discarded successfully."})
+
+
+@login_required
+@require_POST
+def api_bulk_discard(request):
+    """
+    Bulk Operation: Discards multiple selected documents and purges transient files.
+    """
+    try:
+        payload = json.loads(request.body)
+        doc_ids = payload.get("document_ids", [])
+    except Exception:
+        doc_ids = request.POST.getlist("document_ids[]")
+
+    if not doc_ids:
+        return JsonResponse({"ok": False, "error": "No documents selected."}, status=400)
+
+    documents = Document.objects.filter(pk__in=doc_ids).exclude(status=Document.Status.FILED)
+    discarded_ids = []
+
+    for doc in documents:
+        doc.purge_temp_file(force=True)
+        discarded_ids.append(doc.pk)
+        doc.delete()
+
+    return JsonResponse({
+        "ok": True,
+        "discarded_count": len(discarded_ids),
+        "discarded_ids": discarded_ids,
+    })

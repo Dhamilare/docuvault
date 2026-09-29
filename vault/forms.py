@@ -28,8 +28,7 @@ def get_year_choices():
 
 class DocumentUploadForm(forms.ModelForm):
     """
-    Validates a single file upload from the AJAX drag-and-drop dropzone.
-    Enforces extension whitelist and file size limits from settings.
+    Validates a single file upload from the AJAX intake engine.
     """
 
     class Meta:
@@ -160,7 +159,7 @@ class DocumentReviewForm(forms.ModelForm):
         if not category and not new_category_name:
             raise forms.ValidationError("Please select an existing category or enter a new one.")
 
-        # UX enhancement: auto-populate Year from Date if Year wasn't manually selected
+        # UX auto-sync: default Year from Date if Year wasn't manually selected
         doc_date = cleaned_data.get("document_date")
         doc_year = cleaned_data.get("document_year")
         if doc_date and not doc_year:

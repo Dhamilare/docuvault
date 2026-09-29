@@ -21,4 +21,6 @@ urlpatterns = [
     path("api/documents/<int:pk>/review/", views.api_review_document, name="api_review_document"),
     path("api/documents/<int:pk>/retry/", views.api_retry_document, name="api_retry_document"),
     path("api/documents/<int:pk>/delete/", views.api_delete_document, name="api_delete_document"),
+    path("api/documents/bulk-file/", views.api_bulk_file, name="api_bulk_file"),
+    path("api/documents/bulk-discard/", views.api_bulk_discard, name="api_bulk_discard"),
 ]

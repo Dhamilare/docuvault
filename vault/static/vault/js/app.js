@@ -1,6 +1,6 @@
 /**
  * DocuVault AI — Unified Client Engine (app.js)
- * Loaded globally on every page via base.html.
+ * Master utilities loaded globally across all pages via base.html.
  */
 
 // =============================================================================
@@ -57,7 +57,7 @@ async function dvFetch(url, options = {}) {
 window.dvFetch = dvFetch;
 
 // =============================================================================
-// 2. Global Document Delete / Discard (Fixes deleteDoc is not defined)
+// 2. Global Document Delete / Discard Handler
 // =============================================================================
 
 async function deleteDoc(target, optionalId) {
@@ -95,10 +95,8 @@ async function deleteDoc(target, optionalId) {
     if (ok && data.ok) {
       dvToast("Document discarded successfully.", "info");
 
-      // 1. Close modal if open
       closeDocModal();
 
-      // 2. Remove document rows/cards from DOM
       const selectors = [
         `[data-doc-id="${docId}"]`,
         `[data-id="${docId}"]`,
@@ -111,7 +109,6 @@ async function deleteDoc(target, optionalId) {
         setTimeout(() => el.remove(), 200);
       });
 
-      // 3. Decrement review queue badge counters
       const badge = document.getElementById("review-queue-badge");
       if (badge) {
         const count = parseInt(badge.textContent, 10) || 0;
@@ -181,7 +178,6 @@ function closeDocModal() {
 }
 window.closeDocModal = closeDocModal;
 
-// Telemetry & Logs Inspector
 async function openDocModal(docId) {
   const root = getModalRoot();
   if (!root) return;
@@ -208,7 +204,6 @@ async function openDocModal(docId) {
 }
 window.openDocModal = openDocModal;
 
-// Verification & SharePoint Filing Modal
 async function openReviewModal(docId) {
   const root = getModalRoot();
   if (!root) return;
@@ -229,7 +224,6 @@ async function openReviewModal(docId) {
     root.innerHTML = await res.text();
     if (window.lucide) lucide.createIcons();
 
-    // Attach AJAX submit handler to the review form
     const form = root.querySelector("#review-doc-form");
     if (form) {
       form.addEventListener("submit", async (e) => {
@@ -250,7 +244,6 @@ async function openReviewModal(docId) {
             dvToast("Document successfully filed to SharePoint.", "success");
             closeDocModal();
 
-            // Remove card or reload list
             const row = document.querySelector(`[data-doc-id="${docId}"], #doc-card-${docId}`);
             if (row) row.remove();
             if (typeof dvRefreshList === "function") dvRefreshList();
@@ -273,7 +266,6 @@ async function openReviewModal(docId) {
 }
 window.openReviewModal = openReviewModal;
 
-// Close modal with Escape key
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDocModal();
 });

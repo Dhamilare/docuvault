@@ -19,7 +19,6 @@
        class="glass-card rounded-3xl border-2 border-dashed border-slate-700 hover:border-indigo-500/80 hover:bg-indigo-950/10 p-10 sm:p-14 text-center cursor-pointer transition-all duration-300 group shadow-2xl relative overflow-hidden"
        onclick="document.getElementById('file-input').click()">
 
-    <!-- Ambient Glow -->
     <div class="absolute -top-12 -right-12 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none group-hover:bg-indigo-500/20 transition-all"></div>
 
     <div class="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mx-auto mb-4 group-hover:scale-110 group-hover:border-indigo-500/40 transition-transform">
@@ -33,15 +32,22 @@
       Supports PDF, PNG, JPG, JPEG, TIFF — up to {{ MAX_UPLOAD_SIZE_MB|default:25 }} MB each
     </p>
 
-    <div class="mt-4 inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-[11px] text-slate-400">
-      <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400"></i>
-      <span>Automated SHA-256 deduplication active</span>
+    <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+      <div class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-[11px] text-slate-400">
+        <i data-lucide="layers" class="w-3.5 h-3.5 text-indigo-400"></i>
+        <span>Max 5 scans per batch</span>
+      </div>
+
+      <div class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-[11px] text-slate-400">
+        <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400"></i>
+        <span>Automated SHA-256 deduplication active</span>
+      </div>
     </div>
   </div>
 
-  <input id="file-input" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" class="hidden">
+  <input id="file-input" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.tif,.tiff" class="hidden">
 
-  <!-- Real-time Upload Queue Container -->
+  <!-- Queue Container -->
   <div id="queue" class="space-y-3 pt-2"></div>
 </div>
 
@@ -49,6 +55,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="{% static 'vault/js/documents.js' %}"></script>
 <script src="{% static 'vault/js/upload.js' %}"></script>
 {% endblock %}

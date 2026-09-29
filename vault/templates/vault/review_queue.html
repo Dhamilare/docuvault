@@ -4,7 +4,7 @@
 {% block title %}Review Queue — DocuVault AI{% endblock %}
 
 {% block content %}
-<div class="space-y-6 animate-in fade-in duration-300">
+<div class="space-y-6 animate-in fade-in duration-300 pb-20">
 
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -18,9 +18,19 @@
         {% endif %}
       </div>
       <p class="text-xs text-slate-400 mt-1">
-        Documents flagged due to low AI confidence, demand spikes, or ambiguous metadata before SharePoint filing.
+        Documents flagged due to low AI confidence or ambiguous metadata before SharePoint filing.
       </p>
     </div>
+
+    <!-- Select All Checkbox -->
+    {% if items %}
+      <div class="flex items-center space-x-2 bg-slate-900 border border-slate-800 px-3.5 py-2 rounded-xl">
+        <input type="checkbox" id="select-all-queue" class="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-slate-700 cursor-pointer">
+        <label for="select-all-queue" class="text-xs font-semibold text-slate-300 cursor-pointer select-none">
+          Select All
+        </label>
+      </div>
+    {% endif %}
   </div>
 
   <!-- Review Cards Grid -->
@@ -29,36 +39,42 @@
       <div id="doc-card-{{ doc.pk }}" data-doc-id="{{ doc.pk }}"
            class="glass-card rounded-2xl p-5 border border-amber-500/20 hover:border-amber-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         
-        <div class="min-w-0 space-y-1.5 flex-1">
-          <div class="flex items-center space-x-2.5">
-            <span class="p-1 rounded bg-amber-500/10 text-amber-400">
-              <i data-lucide="alert-triangle" class="w-4 h-4"></i>
-            </span>
-            <p class="text-sm font-bold text-slate-100 truncate">{{ doc.original_filename }}</p>
-            <span class="text-[11px] text-slate-500 font-mono">({{ doc.formatted_size }})</span>
-          </div>
+        <!-- Selection Checkbox & Details -->
+        <div class="flex items-start space-x-3.5 flex-1 min-w-0">
+          <input type="checkbox" value="{{ doc.pk }}"
+                 class="doc-checkbox w-4 h-4 mt-1 rounded text-indigo-600 bg-slate-900 border-slate-700 cursor-pointer shrink-0">
 
-          <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
-            {{ doc.ai_summary|default:doc.error_message|default:"Awaiting manual verification." }}
-          </p>
-
-          <div class="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
-            <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-medium">
-              Inferred Type: <strong class="text-indigo-400">{{ doc.category.name|default:"Unclassified" }}</strong>
-            </span>
-            <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-medium">
-              Company: <strong class="text-slate-100">{{ doc.company_name|default:"—" }}</strong>
-            </span>
-            {% if doc.confidence_score is not None %}
-              <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-amber-400 font-bold">
-                {{ doc.confidence_percent }}% confidence
+          <div class="min-w-0 space-y-1.5 flex-1">
+            <div class="flex items-center space-x-2.5">
+              <span class="p-1 rounded bg-amber-500/10 text-amber-400 shrink-0">
+                <i data-lucide="alert-triangle" class="w-4 h-4"></i>
               </span>
-            {% endif %}
+              <p class="text-sm font-bold text-slate-100 truncate">{{ doc.original_filename }}</p>
+              <span class="text-[11px] text-slate-500 font-mono">({{ doc.formatted_size }})</span>
+            </div>
+
+            <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
+              {{ doc.ai_summary|default:doc.error_message|default:"Awaiting manual verification." }}
+            </p>
+
+            <div class="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+              <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-medium">
+                Inferred Type: <strong class="text-indigo-400">{{ doc.category.name|default:"Unclassified" }}</strong>
+              </span>
+              <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-medium">
+                Company: <strong class="text-slate-100">{{ doc.company_name|default:"—" }}</strong>
+              </span>
+              {% if doc.confidence_score is not None %}
+                <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-amber-400 font-bold">
+                  {{ doc.confidence_percent }}% confidence
+                </span>
+              {% endif %}
+            </div>
           </div>
         </div>
 
         <!-- Action Buttons -->
-        <div class="flex items-center space-x-2.5 shrink-0 sm:self-center">
+        <div class="flex items-center space-x-2.5 shrink-0 sm:self-center ml-7 sm:ml-0">
           <button type="button" onclick="deleteDoc({{ doc.pk }})"
                   class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/30 text-xs font-semibold flex items-center space-x-1.5 transition">
             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
@@ -86,9 +102,37 @@
   </div>
 </div>
 
+<!-- Floating Bulk Action Toolbar (appears when items are checked) -->
+<div id="bulk-actions-bar"
+     class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 border border-indigo-500/40 backdrop-blur-xl px-5 py-3 rounded-2xl shadow-2xl items-center space-x-4 animate-in slide-in-from-bottom duration-200">
+  <span id="bulk-selected-count" class="text-xs font-bold text-indigo-300 bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-800">
+    0 selected
+  </span>
+
+  <div class="h-4 w-px bg-slate-700"></div>
+
+  <button id="btn-bulk-file" type="button" onclick="bulkFileSelected()"
+          class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-lg shadow-indigo-600/30 transition active:scale-95">
+    <i data-lucide="check" class="w-3.5 h-3.5"></i>
+    <span>Approve &amp; File Selected</span>
+  </button>
+
+  <button id="btn-bulk-discard" type="button" onclick="bulkDiscardSelected()"
+          class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 text-xs font-semibold flex items-center space-x-1.5 transition">
+    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+    <span>Discard Selected</span>
+  </button>
+</div>
+
 <div id="modal-root"></div>
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="{% static 'vault/js/documents.js' %}"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    if (typeof window.initBulkReviewQueue === "function") {
+      window.initBulkReviewQueue();
+    }
+  });
+</script>
 {% endblock %}

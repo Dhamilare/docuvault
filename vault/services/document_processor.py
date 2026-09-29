@@ -3,7 +3,7 @@ import logging
 import math
 import os
 import time
-from typing import Tuple
+from typing import Tuple, Dict, Any
 import msal
 import requests
 from django.conf import settings
@@ -34,11 +34,73 @@ def get_graph_app_token() -> str:
     raise PermissionError(f"Failed to acquire Microsoft Graph app token: {err}")
 
 
-def upload_to_sharepoint(document: Document) -> Tuple[str, str, str]:
+def sync_sharepoint_metadata(site_id: str, drive_id: str, item_id: str, token: str, document: Document) -> Dict[str, Any]:
     """
-    Uploads document to SharePoint via Microsoft Graph API.
-    Supports both direct upload (<= 4MB) and UploadSession chunking (> 4MB).
-    Returns (item_id, web_url, folder_path).
+    Enterprise ECM Integration:
+    Updates SharePoint Custom Metadata Columns on the document's backing List Item.
+    Dynamically identifies existing columns in the library so it never fails if a column is missing.
+    """
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    fields_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/{item_id}/listItem/fields"
+
+    try:
+        # 1. Query available columns on this list item
+        get_resp = requests.get(fields_url, headers=headers, timeout=15)
+        if get_resp.status_code != 200:
+            logger.warning("Could not fetch SharePoint item fields [%s]: %s", get_resp.status_code, get_resp.text)
+            return {}
+
+        available_fields = get_resp.json()
+
+        # 2. Candidate mapping (Target SharePoint column name -> Document value)
+        candidate_fields = {
+            "Title": document.original_filename,
+            "CompanyName": document.company_name or "",
+            "Company": document.company_name or "",
+            "DocumentCategory": document.category.name if document.category else "",
+            "Category": document.category.name if document.category else "",
+            "DocumentYear": str(document.document_year) if document.document_year else "",
+            "Year": str(document.document_year) if document.document_year else "",
+            "DocumentDate": document.document_date.strftime("%Y-%m-%d") if document.document_date else None,
+            "ConfidenceScore": f"{document.confidence_percent}%" if document.confidence_percent else "",
+            "AISummary": document.ai_summary or "",
+        }
+
+        # Include extracted entities (e.g. invoice_number, total_amount)
+        if isinstance(document.extracted_entities, dict):
+            for k, v in document.extracted_entities.items():
+                sanitized_key = "".join(x.title() for x in k.replace("-", "_").split("_"))
+                candidate_fields[sanitized_key] = str(v)
+
+        # 3. Filter down to columns that actually exist in this SharePoint Library
+        patch_payload = {}
+        for col_name, col_value in candidate_fields.items():
+            if col_value is not None and col_name in available_fields:
+                patch_payload[col_name] = col_value
+
+        if not patch_payload:
+            return {}
+
+        # 4. Patch updated fields to SharePoint
+        patch_resp = requests.patch(fields_url, headers=headers, json=patch_payload, timeout=20)
+        if patch_resp.status_code in (200, 204):
+            return patch_payload
+        else:
+            logger.warning("SharePoint column update returned [%s]: %s", patch_resp.status_code, patch_resp.text)
+            return {}
+
+    except Exception as exc:
+        logger.error("Error syncing SharePoint metadata columns for doc %s: %s", document.pk, exc)
+        return {}
+
+
+def upload_to_sharepoint(document: Document) -> Tuple[str, str, str, Dict[str, Any]]:
+    """
+    Uploads document to SharePoint via Microsoft Graph API and updates metadata columns.
+    Returns (item_id, web_url, folder_path, synced_columns).
     """
     token = get_graph_app_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -50,17 +112,18 @@ def upload_to_sharepoint(document: Document) -> Tuple[str, str, str]:
     if not site_id or not drive_id:
         raise ValueError("GRAPH_SITE_ID or GRAPH_DRIVE_ID is missing in settings/.env.")
 
-    # Generate sanitized target folder path
     folder_path = document.clean_sharepoint_path(base_root=root_folder)
     file_name = document.original_filename
     file_path = document.temp_file.path
     file_size = os.path.getsize(file_path)
 
-    # Encode path for Microsoft Graph
     encoded_item_path = f"{folder_path}/{file_name}".replace(" ", "%20")
     base_drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}"
 
-    # Branch 1: Files <= 4 MB (Direct PUT)
+    item_id = None
+    web_url = ""
+
+    # Direct PUT (<= 4MB)
     if file_size <= 4 * 1024 * 1024:
         put_url = f"{base_drive_url}/root:/{encoded_item_path}:/content"
         with open(file_path, "rb") as f:
@@ -73,52 +136,58 @@ def upload_to_sharepoint(document: Document) -> Tuple[str, str, str]:
         if resp.status_code not in (200, 201):
             raise RuntimeError(f"Graph PUT upload failed [{resp.status_code}]: {resp.text}")
         data = resp.json()
-        return data["id"], data.get("webUrl", ""), folder_path
+        item_id, web_url = data["id"], data.get("webUrl", "")
 
-    # Branch 2: Files > 4 MB (Create Upload Session & Stream Chunks)
-    session_url = f"{base_drive_url}/root:/{encoded_item_path}:/createUploadSession"
-    session_payload = {
-        "item": {
-            "@microsoft.graph.conflictBehavior": "rename",
-            "name": file_name,
-        }
-    }
-    s_resp = requests.post(session_url, headers=headers, json=session_payload, timeout=30)
-    if s_resp.status_code not in (200, 201):
-        raise RuntimeError(f"Failed to create Graph UploadSession [{s_resp.status_code}]: {s_resp.text}")
-
-    upload_url = s_resp.json()["uploadUrl"]
-    chunk_size = 320 * 1024 * 10  # 3.2 MB chunks (Graph requires multiples of 320 KiB)
-    final_data = None
-
-    with open(file_path, "rb") as f:
-        chunk_idx = 0
-        while True:
-            chunk = f.read(chunk_size)
-            if not chunk:
-                break
-            start_byte = chunk_idx * chunk_size
-            end_byte = start_byte + len(chunk) - 1
-            chunk_headers = {
-                "Content-Length": str(len(chunk)),
-                "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
+    # Chunked UploadSession (> 4MB)
+    else:
+        session_url = f"{base_drive_url}/root:/{encoded_item_path}:/createUploadSession"
+        session_payload = {
+            "item": {
+                "@microsoft.graph.conflictBehavior": "rename",
+                "name": file_name,
             }
-            c_resp = requests.put(upload_url, headers=chunk_headers, data=chunk, timeout=90)
-            if c_resp.status_code not in (200, 201, 202):
-                raise RuntimeError(f"Chunk upload failed [{c_resp.status_code}]: {c_resp.text}")
-            if c_resp.status_code in (200, 201):
-                final_data = c_resp.json()
-            chunk_idx += 1
+        }
+        s_resp = requests.post(session_url, headers=headers, json=session_payload, timeout=30)
+        if s_resp.status_code not in (200, 201):
+            raise RuntimeError(f"Failed to create Graph UploadSession [{s_resp.status_code}]: {s_resp.text}")
 
-    if not final_data:
-        raise RuntimeError("Upload session completed without returning final item payload.")
+        upload_url = s_resp.json()["uploadUrl"]
+        chunk_size = 320 * 1024 * 10  # 3.2 MB
+        final_data = None
 
-    return final_data["id"], final_data.get("webUrl", ""), folder_path
+        with open(file_path, "rb") as f:
+            chunk_idx = 0
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                start_byte = chunk_idx * chunk_size
+                end_byte = start_byte + len(chunk) - 1
+                chunk_headers = {
+                    "Content-Length": str(len(chunk)),
+                    "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
+                }
+                c_resp = requests.put(upload_url, headers=chunk_headers, data=chunk, timeout=90)
+                if c_resp.status_code not in (200, 201, 202):
+                    raise RuntimeError(f"Chunk upload failed [{c_resp.status_code}]: {c_resp.text}")
+                if c_resp.status_code in (200, 201):
+                    final_data = c_resp.json()
+                chunk_idx += 1
+
+        if not final_data:
+            raise RuntimeError("Upload session completed without returning final item payload.")
+
+        item_id, web_url = final_data["id"], final_data.get("webUrl", "")
+
+    # ECM Step: Sync SharePoint Custom Metadata Columns
+    synced_cols = sync_sharepoint_metadata(site_id, drive_id, item_id, token, document)
+
+    return item_id, web_url, folder_path, synced_cols
 
 
 def file_reviewed_document(document: Document, actor=None) -> Tuple[bool, str]:
     """
-    Safely transfers the verified document to SharePoint and records audit trail.
+    Transfers the verified document to SharePoint, syncs metadata columns, and records logs.
     Returns (success: bool, error_message: str).
     """
     if not document.has_temp_file:
@@ -126,11 +195,11 @@ def file_reviewed_document(document: Document, actor=None) -> Tuple[bool, str]:
         document.mark(Document.Status.FAILED, error_message=msg)
         return False, msg
 
-    document.log_step(ProcessingLog.Step.FILING, "Filing document to SharePoint...", actor=actor)
+    document.log_step(ProcessingLog.Step.FILING, "Filing document and syncing ECM metadata to SharePoint...", actor=actor)
     start_time = time.time()
 
     try:
-        item_id, web_url, folder_path = upload_to_sharepoint(document)
+        item_id, web_url, folder_path, synced_cols = upload_to_sharepoint(document)
         duration_ms = int((time.time() - start_time) * 1000)
 
         document.sharepoint_item_id = item_id
@@ -141,15 +210,18 @@ def file_reviewed_document(document: Document, actor=None) -> Tuple[bool, str]:
         document.error_message = ""
         document.save()
 
+        msg = f"Successfully filed to SharePoint: '{folder_path}'"
+        if synced_cols:
+            msg += f" with {len(synced_cols)} ECM columns synced."
+
         document.log_step(
             ProcessingLog.Step.FILED,
-            f"Successfully filed to SharePoint: '{folder_path}'",
+            msg,
             actor=actor,
             duration_ms=duration_ms,
-            metadata={"web_url": web_url, "item_id": item_id},
+            metadata={"web_url": web_url, "item_id": item_id, "columns": synced_cols},
         )
 
-        # Safely remove transient file now that SharePoint upload succeeded
         config = SystemConfiguration.get_settings()
         if config.delete_local_on_file:
             document.purge_temp_file()
@@ -178,9 +250,6 @@ def file_reviewed_document(document: Document, actor=None) -> Tuple[bool, str]:
 # ==============================================================================
 
 def _call_gemini_with_retry(document: Document) -> dict:
-    """
-    Invokes Google Gemini with backoff retry on 503/429 transient errors.
-    """
     api_key = settings.GEMINI_API_KEY
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not configured.")
@@ -216,12 +285,7 @@ def _call_gemini_with_retry(document: Document) -> dict:
                 return json.loads(content_text)
 
             if resp.status_code in (503, 429):
-                # Transient overload: wait with exponential backoff (e.g. 2s, 4s, 8s)
                 sleep_sec = math.pow(2, attempt)
-                logger.warning(
-                    "Gemini API %s on doc %s (attempt %d/%d). Retrying in %ds...",
-                    resp.status_code, document.pk, attempt, max_retries, sleep_sec
-                )
                 time.sleep(sleep_sec)
                 last_error = f"Gemini {resp.status_code}: {resp.text}"
                 continue
@@ -236,11 +300,6 @@ def _call_gemini_with_retry(document: Document) -> dict:
 
 
 def process_document(document_pk: int):
-    """
-    Main intake processing pipeline. Runs Gemini classification.
-    If Gemini fails with 503 or transient errors, it moves the document to NEEDS_REVIEW
-    and preserves the local temp file for manual review and SharePoint filing.
-    """
     try:
         doc = Document.objects.get(pk=document_pk)
     except Document.DoesNotExist:
@@ -255,7 +314,6 @@ def process_document(document_pk: int):
         ai_data = _call_gemini_with_retry(doc)
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Parse extracted data
         doc.company_name = ai_data.get("company_name") or ""
         doc.document_year = ai_data.get("document_year")
         doc.ai_summary = ai_data.get("summary") or ""
@@ -265,11 +323,10 @@ def process_document(document_pk: int):
 
         cat_name = ai_data.get("category") or "Uncategorized"
         doc.category = DocumentCategory.get_or_create_discovered(cat_name)
-
         doc.processed_at = timezone.now()
+
         config = SystemConfiguration.get_settings()
 
-        # Check if confidence satisfies auto-filing criteria
         if doc.confidence_score >= config.auto_file_threshold:
             doc.status = Document.Status.PROCESSING
             doc.save()
@@ -291,11 +348,9 @@ def process_document(document_pk: int):
     except Exception as exc:
         duration_ms = int((time.time() - start_time) * 1000)
         logger.error("Gemini classification failed for document %s: %s", doc.pk, exc)
-
-        # Move to NEEDS_REVIEW so the operator can file manually
         doc.status = Document.Status.NEEDS_REVIEW
         doc.error_message = str(exc)
-        doc.ai_summary = "AI classification unavailable (model high demand / rate limit). Ready for manual verification."
+        doc.ai_summary = "AI classification unavailable (high model demand). Ready for manual verification."
         doc.save()
 
         doc.log_step(

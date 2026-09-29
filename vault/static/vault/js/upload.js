@@ -1,6 +1,6 @@
 /**
- * DocuVault AI — Drag-and-Drop Intake Engine
- * Sequentially uploads scanned files to avoid API rate limits and gives instant feedback.
+ * DocuVault AI — Drag-and-Drop Intake Engine (upload.js)
+ * Sequentially uploads scanned files with max-5 batch limit.
  */
 
 (function () {
@@ -9,6 +9,12 @@
   const queue = document.getElementById("queue");
 
   if (!dropzone || !fileInput || !queue) return;
+
+  // Prevent multiple executions / duplicate listeners
+  if (dropzone.dataset.initialized === "true") return;
+  dropzone.dataset.initialized = "true";
+
+  fileInput.multiple = true;
 
   ["dragenter", "dragover"].forEach((evt) =>
     dropzone.addEventListener(evt, (e) => {
@@ -26,12 +32,29 @@
     })
   );
 
-  dropzone.addEventListener("drop", (e) => handleFiles(e.dataTransfer.files));
-  fileInput.addEventListener("change", (e) => handleFiles(e.target.files));
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    handleFiles(e.dataTransfer.files);
+  });
+
+  fileInput.addEventListener("change", (e) => {
+    handleFiles(e.target.files);
+    fileInput.value = "";
+  });
 
   function handleFiles(fileList) {
-    const files = Array.from(fileList);
+    let files = Array.from(fileList);
     if (!files.length) return;
+
+    if (files.length > 5) {
+      if (typeof dvToast === "function") {
+        dvToast("Batch limit is 5 documents per upload. Ingesting first 5 scans.", "warning");
+      } else {
+        alert("Batch limit is 5 documents per upload. Ingesting first 5 scans.");
+      }
+      files = files.slice(0, 5);
+    }
+
     files.forEach(queueFile);
     processSequentially(files);
   }
@@ -83,7 +106,7 @@
         row.dataset.done = "true";
 
         if (ok && data.ok) {
-          row.dataset.docId = data.id; // Assign ID for dynamic removal
+          row.dataset.docId = data.id;
           applyResult(row, data);
         } else {
           setRowState(row, data.error || "Upload rejected.", "bg-rose-500/10 text-rose-400 border border-rose-500/20", 100);
@@ -120,15 +143,14 @@
       ? details.join(" · ")
       : (doc.ai_summary || doc.error_message || "Ingestion complete.");
 
-    // Action buttons container
     const actions = document.createElement("div");
-    actions.className = "flex items-center space-x-3 mt-1.5";
+    actions.className = "flex items-center space-x-3 mt-2";
 
     if (doc.status === "needs_review" || doc.status === "failed") {
       const reviewBtn = document.createElement("button");
       reviewBtn.type = "button";
       reviewBtn.className = "text-xs font-semibold text-amber-400 hover:text-amber-300 flex items-center space-x-1";
-      reviewBtn.innerHTML = `<span>Review & File</span><i data-lucide="arrow-right" class="w-3 h-3"></i>`;
+      reviewBtn.innerHTML = `<span>Review &amp; File</span><i data-lucide="arrow-right" class="w-3 h-3"></i>`;
       reviewBtn.onclick = () => window.openReviewModal(doc.id);
       actions.appendChild(reviewBtn);
 
@@ -136,7 +158,7 @@
       discardBtn.type = "button";
       discardBtn.className = "text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1";
       discardBtn.innerHTML = `<span>Discard</span>`;
-      discardBtn.onclick = () => window.discardDocument(doc.id);
+      discardBtn.onclick = () => window.deleteDoc(doc.id);
       actions.appendChild(discardBtn);
     } else if (doc.status === "filed") {
       const telemetryBtn = document.createElement("button");
