@@ -12,13 +12,13 @@
       <div class="flex items-center space-x-2.5">
         <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Review Queue</h1>
         {% if items %}
-          <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+          <span id="review-queue-badge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20">
             {{ items|length }} awaiting check
           </span>
         {% endif %}
       </div>
       <p class="text-xs text-slate-400 mt-1">
-        Documents flagged due to low AI confidence or ambiguous metadata before SharePoint filing.
+        Documents flagged due to low AI confidence, demand spikes, or ambiguous metadata before SharePoint filing.
       </p>
     </div>
   </div>
@@ -26,7 +26,8 @@
   <!-- Review Cards Grid -->
   <div class="grid grid-cols-1 gap-3.5">
     {% for doc in items %}
-      <div class="glass-card rounded-2xl p-5 border border-amber-500/20 hover:border-amber-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div id="doc-card-{{ doc.pk }}" data-doc-id="{{ doc.pk }}"
+           class="glass-card rounded-2xl p-5 border border-amber-500/20 hover:border-amber-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         
         <div class="min-w-0 space-y-1.5 flex-1">
           <div class="flex items-center space-x-2.5">
@@ -38,7 +39,7 @@
           </div>
 
           <p class="text-xs text-slate-300 leading-relaxed line-clamp-2">
-            {{ doc.ai_summary|default:"No executive summary extracted." }}
+            {{ doc.ai_summary|default:doc.error_message|default:"Awaiting manual verification." }}
           </p>
 
           <div class="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
@@ -56,8 +57,15 @@
           </div>
         </div>
 
+        <!-- Action Buttons -->
         <div class="flex items-center space-x-2.5 shrink-0 sm:self-center">
-          <button onclick="openDocModal({{ doc.pk }})"
+          <button type="button" onclick="deleteDoc({{ doc.pk }})"
+                  class="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/30 text-xs font-semibold flex items-center space-x-1.5 transition">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            <span>Discard</span>
+          </button>
+
+          <button type="button" onclick="openReviewModal({{ doc.pk }})"
                   class="px-4 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center space-x-1.5 transition">
             <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
             <span>Verify &amp; File</span>

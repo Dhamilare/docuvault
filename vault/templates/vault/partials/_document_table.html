@@ -1,10 +1,12 @@
 {% load static %}
 <div class="glass-card rounded-2xl overflow-hidden border border-slate-800 shadow-xl">
 
-  <!-- ================= Mobile View: Touch Cards (Hidden on sm screens and up) ================= -->
+  <!-- ================= Mobile View: Touch Cards ================= -->
   <div class="sm:hidden divide-y divide-slate-800/80">
     {% for doc in page_obj %}
-      <div class="p-4 hover:bg-slate-900/50 cursor-pointer transition active:bg-slate-900" onclick="openDocModal({{ doc.pk }})">
+      <div id="doc-row-{{ doc.pk }}" data-doc-id="{{ doc.pk }}"
+           class="p-4 hover:bg-slate-900/50 cursor-pointer transition active:bg-slate-900"
+           onclick="{% if doc.status == 'needs_review' or doc.status == 'failed' %}openReviewModal({{ doc.pk }}){% else %}openDocModal({{ doc.pk }}){% endif %}">
         <div class="flex items-start justify-between gap-2">
           <div class="flex items-center space-x-2.5 min-w-0">
             <div class="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
@@ -46,7 +48,7 @@
     {% endfor %}
   </div>
 
-  <!-- ================= Desktop View: Full Table (Hidden on mobile) ================= -->
+  <!-- ================= Desktop View: Full Table ================= -->
   <div class="hidden sm:block overflow-x-auto">
     <table class="w-full text-left border-collapse text-sm">
       <thead>
@@ -57,13 +59,14 @@
           <th class="px-4 py-3.5">Year</th>
           <th class="px-4 py-3.5">Status</th>
           <th class="px-4 py-3.5">Confidence</th>
-          <th class="px-5 py-3.5 text-right">Uploaded</th>
+          <th class="px-4 py-3.5">Uploaded</th>
+          <th class="px-4 py-3.5 text-right">Actions</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-800/80">
         {% for doc in page_obj %}
-          <tr class="hover:bg-slate-900/40 cursor-pointer transition-colors group" onclick="openDocModal({{ doc.pk }})">
-            <td class="px-5 py-4">
+          <tr id="doc-row-{{ doc.pk }}" data-doc-id="{{ doc.pk }}" class="hover:bg-slate-900/40 transition-colors group">
+            <td class="px-5 py-4 cursor-pointer" onclick="openDocModal({{ doc.pk }})">
               <div class="flex items-center space-x-3">
                 <div class="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700/80 flex items-center justify-center shrink-0 text-slate-300 group-hover:border-indigo-500/50 transition">
                   {% if doc.file_extension == '.pdf' %}
@@ -134,13 +137,34 @@
               {% endif %}
             </td>
 
-            <td class="px-5 py-4 text-xs text-slate-400 text-right">
+            <td class="px-4 py-4 text-xs text-slate-400">
               {{ doc.created_at|date:"M j, Y" }}
+            </td>
+
+            <!-- Quick Actions -->
+            <td class="px-4 py-4 text-right">
+              <div class="flex items-center justify-end space-x-2">
+                {% if doc.status == 'needs_review' or doc.status == 'failed' %}
+                  <button type="button" onclick="openReviewModal({{ doc.pk }})" title="Review & File"
+                          class="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition">
+                    <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+                  </button>
+                  <button type="button" onclick="deleteDoc({{ doc.pk }})" title="Discard"
+                          class="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 border border-slate-700/80 transition">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                  </button>
+                {% else %}
+                  <button type="button" onclick="openDocModal({{ doc.pk }})" title="Inspect"
+                          class="p-1.5 rounded-lg bg-slate-900 hover:bg-indigo-500/10 text-slate-400 hover:text-indigo-400 border border-slate-700/80 transition">
+                    <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+                  </button>
+                {% endif %}
+              </div>
             </td>
           </tr>
         {% empty %}
           <tr>
-            <td colspan="7" class="px-4 py-12 text-center text-xs text-slate-400">No documents match these filters.</td>
+            <td colspan="8" class="px-4 py-12 text-center text-xs text-slate-400">No documents match these filters.</td>
           </tr>
         {% endfor %}
       </tbody>

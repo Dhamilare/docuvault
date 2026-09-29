@@ -1,8 +1,133 @@
 /**
- * DocuVault AI — Document Modal & Inspection Controller
- * Dynamically loads telemetry detail or verification review partials into #modal-root or #modal-container.
+ * DocuVault AI — Documents & Review Queue Controller
  */
 
+// 1. CSRF Helper
+function getCsrfToken() {
+  if (window.CSRF_TOKEN) return window.CSRF_TOKEN;
+  if (document.cookie && document.cookie !== "") {
+    const cookies = document.cookie.split(";");
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.startsWith("csrftoken=")) {
+        return decodeURIComponent(cookie.substring("csrftoken=".length));
+      }
+    }
+  }
+  return document.querySelector("[name=csrfmiddlewaretoken]")?.value || "";
+}
+
+// 2. Universal Fetch Wrapper
+async function dvFetch(url, options = {}) {
+  const opts = {
+    method: options.method || "GET",
+    headers: {
+      "X-Requested-With": "XMLHttpRequest",
+      ...(options.headers || {}),
+    },
+    body: options.body,
+  };
+
+  if (opts.method !== "GET") {
+    const token = getCsrfToken();
+    if (token) opts.headers["X-CSRFToken"] = token;
+  }
+
+  const res = await fetch(url, opts);
+  const contentType = res.headers.get("content-type") || "";
+  let data = {};
+  try {
+    data = contentType.includes("application/json") ? await res.json() : await res.text();
+  } catch (e) {}
+
+  return { status: res.status, data, ok: res.ok };
+}
+window.dvFetch = dvFetch;
+
+// 3. Global Delete / Discard Document (Fixes deleteDoc is not defined)
+async function deleteDoc(target, optionalId) {
+  let docId = optionalId;
+  let element = null;
+
+  if (typeof target === "number" || typeof target === "string") {
+    docId = target;
+  } else if (target && target.nodeType) {
+    element = target;
+    docId = optionalId || target.dataset.id || target.dataset.docId;
+  }
+
+  if (!docId) {
+    console.error("deleteDoc: No document ID provided.");
+    return;
+  }
+
+  if (!confirm("Are you sure you want to discard this document? The local temporary scan will be permanently deleted.")) {
+    return;
+  }
+
+  const btn = element ? element.closest("button") : null;
+  const originalHtml = btn ? btn.innerHTML : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="animate-pulse text-rose-400">Discarding…</span>`;
+  }
+
+  try {
+    const { status, data, ok } = await dvFetch(`/api/documents/${docId}/delete/`, {
+      method: "POST",
+    });
+
+    if (ok && data.ok) {
+      if (typeof dvToast === "function") {
+        dvToast("Document discarded successfully.", "info");
+      }
+
+      // Close modal if open
+      closeDocModal();
+
+      // Remove row/card from DOM with smooth animation
+      const selectors = [
+        `[data-doc-id="${docId}"]`,
+        `[data-id="${docId}"]`,
+        `#doc-row-${docId}`,
+        `#doc-card-${docId}`,
+      ];
+      document.querySelectorAll(selectors.join(",")).forEach((el) => {
+        el.classList.add("opacity-0", "scale-95", "transition-all", "duration-200");
+        setTimeout(() => el.remove(), 200);
+      });
+
+      // Update badge counter
+      const badge = document.getElementById("review-queue-badge");
+      if (badge) {
+        const count = parseInt(badge.textContent, 10) || 0;
+        if (count > 1) {
+          badge.textContent = count - 1;
+        } else {
+          badge.remove();
+        }
+      }
+    } else {
+      const errMsg = data && data.error ? data.error : "Failed to discard document.";
+      alert(errMsg);
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+      }
+    }
+  } catch (err) {
+    console.error("deleteDoc failed:", err);
+    alert("Network error while discarding document.");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+}
+window.deleteDoc = deleteDoc;
+window.discardDocument = deleteDoc;
+
+// 4. Modal Handlers
 function getModalRoot() {
   return document.getElementById("modal-root") || document.getElementById("modal-container");
 }
@@ -27,7 +152,18 @@ function showModalLoading(text) {
   document.body.style.overflow = "hidden";
 }
 
-// 1. Telemetry & Audit Logs Modal
+function closeDocModal() {
+  const root = getModalRoot();
+  if (root) {
+    root.innerHTML = "";
+    root.classList.add("hidden");
+    root.classList.remove("flex");
+  }
+  document.body.style.overflow = "";
+}
+window.closeDocModal = closeDocModal;
+
+// Read-only Telemetry Inspector
 async function openDocModal(docId) {
   const root = getModalRoot();
   if (!root) return;
@@ -40,7 +176,7 @@ async function openDocModal(docId) {
     });
 
     if (!res.ok) {
-      dvToast("Failed to load document details.", "error");
+      alert("Failed to load document details.");
       closeDocModal();
       return;
     }
@@ -48,12 +184,13 @@ async function openDocModal(docId) {
     root.innerHTML = await res.text();
     if (window.lucide) lucide.createIcons();
   } catch (err) {
-    dvToast("Network error fetching document details.", "error");
+    alert("Network error fetching document details.");
     closeDocModal();
   }
 }
+window.openDocModal = openDocModal;
 
-// 2. Verification & SharePoint Filing Modal
+// Review & Verification Workspace (With Date & Year Widgets and SharePoint filing)
 async function openReviewModal(docId) {
   const root = getModalRoot();
   if (!root) return;
@@ -66,7 +203,7 @@ async function openReviewModal(docId) {
     });
 
     if (!res.ok) {
-      dvToast("Failed to load review form.", "error");
+      alert("Failed to load review form.");
       closeDocModal();
       return;
     }
@@ -92,46 +229,31 @@ async function openReviewModal(docId) {
           });
 
           if (ok && data.ok) {
-            dvToast("Document successfully filed to SharePoint.", "success");
             closeDocModal();
-
-            // Refresh queue or remove reviewed card
-            const row = document.querySelector(`[data-doc-id="${docId}"]`);
-            if (row) row.remove();
+            // Remove filed item from DOM or refresh
+            const item = document.querySelector(`[data-doc-id="${docId}"], #doc-card-${docId}`);
+            if (item) item.remove();
+            if (typeof dvRefreshList === "function") dvRefreshList();
           } else {
-            dvToast(data.error || "SharePoint filing failed.", "error");
+            alert((data && data.error) || "SharePoint filing failed.");
             submitBtn.disabled = false;
             submitBtn.innerHTML = origText;
           }
         } catch (err) {
-          dvToast("Network error filing document.", "error");
+          alert("Network error while submitting to SharePoint.");
           submitBtn.disabled = false;
           submitBtn.innerHTML = origText;
         }
       });
     }
   } catch (err) {
-    dvToast("Network error opening review modal.", "error");
+    alert("Network error opening review modal.");
     closeDocModal();
   }
 }
-
-function closeDocModal() {
-  const root = getModalRoot();
-  if (root) {
-    root.innerHTML = "";
-    root.classList.add("hidden");
-    root.classList.remove("flex");
-  }
-  document.body.style.overflow = "";
-}
-
-// Expose globally
-window.openDocModal = openDocModal;
 window.openReviewModal = openReviewModal;
-window.closeDocModal = closeDocModal;
 
-// Global hotkeys (ESC to dismiss)
+// Dismiss modal with ESC
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDocModal();
 });
