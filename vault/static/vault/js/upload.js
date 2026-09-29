@@ -79,10 +79,11 @@
       formData.append("temp_file", file);
 
       try {
-        const { status, data } = await dvFetch("/api/upload/", { method: "POST", body: formData });
+        const { status, data, ok } = await dvFetch("/api/upload/", { method: "POST", body: formData });
         row.dataset.done = "true";
 
-        if (status === 200 && data.ok) {
+        if (ok && data.ok) {
+          row.dataset.docId = data.id; // Assign ID for dynamic removal
           applyResult(row, data);
         } else {
           setRowState(row, data.error || "Upload rejected.", "bg-rose-500/10 text-rose-400 border border-rose-500/20", 100);
@@ -112,28 +113,42 @@
 
     const details = [];
     if (doc.category) details.push(doc.category);
-    if (doc.company_name) details.push(doc.company_name);
+    if (doc.company_name && doc.company_name !== "—") details.push(doc.company_name);
     if (doc.document_year) details.push(doc.document_year);
 
     row.querySelector(".status-text").textContent = details.length
       ? details.join(" · ")
-      : (doc.error_message || "Ingestion complete.");
+      : (doc.ai_summary || doc.error_message || "Ingestion complete.");
 
-    // Action button to open modal directly from dropzone queue
-    if (doc.status === "needs_review" || doc.status === "failed" || doc.status === "filed") {
-      const link = document.createElement("button");
-      link.type = "button";
-      link.className = `text-xs font-semibold mt-1.5 flex items-center space-x-1 ${
-        doc.status === "needs_review" ? "text-amber-400 hover:text-amber-300" : "text-indigo-400 hover:text-indigo-300"
-      }`;
-      link.innerHTML = `
-        <span>${doc.status === "needs_review" ? "Review & Confirm" : "View Telemetry"}</span>
-        <i data-lucide="arrow-right" class="w-3 h-3"></i>
-      `;
-      link.onclick = () => openDocModal(doc.id);
-      row.querySelector(".status-text").after(link);
-      if (window.lucide) lucide.createIcons({ root: row });
+    // Action buttons container
+    const actions = document.createElement("div");
+    actions.className = "flex items-center space-x-3 mt-1.5";
+
+    if (doc.status === "needs_review" || doc.status === "failed") {
+      const reviewBtn = document.createElement("button");
+      reviewBtn.type = "button";
+      reviewBtn.className = "text-xs font-semibold text-amber-400 hover:text-amber-300 flex items-center space-x-1";
+      reviewBtn.innerHTML = `<span>Review & File</span><i data-lucide="arrow-right" class="w-3 h-3"></i>`;
+      reviewBtn.onclick = () => window.openReviewModal(doc.id);
+      actions.appendChild(reviewBtn);
+
+      const discardBtn = document.createElement("button");
+      discardBtn.type = "button";
+      discardBtn.className = "text-xs font-semibold text-slate-400 hover:text-rose-400 flex items-center space-x-1";
+      discardBtn.innerHTML = `<span>Discard</span>`;
+      discardBtn.onclick = () => window.discardDocument(doc.id);
+      actions.appendChild(discardBtn);
+    } else if (doc.status === "filed") {
+      const telemetryBtn = document.createElement("button");
+      telemetryBtn.type = "button";
+      telemetryBtn.className = "text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center space-x-1";
+      telemetryBtn.innerHTML = `<span>View Telemetry</span><i data-lucide="arrow-right" class="w-3 h-3"></i>`;
+      telemetryBtn.onclick = () => window.openDocModal(doc.id);
+      actions.appendChild(telemetryBtn);
     }
+
+    row.querySelector(".status-text").after(actions);
+    if (window.lucide) lucide.createIcons({ root: row });
   }
 
   function setRowState(row, text, badgeClasses, width) {

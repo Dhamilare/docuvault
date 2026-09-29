@@ -9,10 +9,6 @@ from django.utils.text import slugify
 class DocumentCategory(models.Model):
     """
     A running registry of document types Gemini has discovered so far.
-
-    Classification is open-ended — the AI is never restricted to a fixed list —
-    tracking what it has produced lets an admin see the set of categories in use,
-    rename/merge near-duplicates, and display sleek Tailwind badges.
     """
 
     COLOR_CHOICES = [
@@ -88,10 +84,6 @@ class DocumentCategory(models.Model):
 
     @classmethod
     def get_or_create_discovered(cls, raw_name: str, description: str = "") -> "DocumentCategory":
-        """
-        Locates an existing category using normalized text matching,
-        or creates a newly discovered category.
-        """
         name = (raw_name or "Uncategorized").strip()
         canonical = cls.normalize_category_name(name)
 
@@ -99,9 +91,8 @@ class DocumentCategory(models.Model):
         if category:
             return category.merged_into or category
 
-        # Assign a deterministic Tailwind color based on string hash
         colors = [c[0] for c in cls.COLOR_CHOICES]
-        assigned_color = colors[hash(canonical) % len(colors)]
+        assigned_color = colors[abs(hash(canonical)) % len(colors)]
 
         return cls.objects.create(
             name=name.title(),
@@ -115,7 +106,6 @@ class DocumentCategory(models.Model):
         self.save(update_fields=["document_count"])
 
     def merge_into_target(self, target_category: "DocumentCategory"):
-        """Consolidates this category into target_category and marks as alias."""
         if self.pk == target_category.pk:
             return
         self.documents.update(category=target_category)
@@ -138,7 +128,7 @@ class Document(models.Model):
         upload_to="incoming/%Y/%m/%d/",
         null=True,
         blank=True,
-        help_text="Transient local copy — deleted once filed to SharePoint.",
+        help_text="Transient local copy — strictly deleted only after successful SharePoint filing.",
     )
     file_size_bytes = models.PositiveIntegerField(default=0)
     content_type = models.CharField(max_length=100, blank=True)
@@ -148,7 +138,7 @@ class Document(models.Model):
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True
     )
 
-    # --- AI-derived fields (open-ended; not constrained to a fixed enum) ---
+    # AI-derived metadata
     category = models.ForeignKey(
         DocumentCategory,
         null=True,
@@ -171,7 +161,7 @@ class Document(models.Model):
     )
     ai_raw_response = models.JSONField(null=True, blank=True)
 
-    # --- Operator Review Tracking ---
+    # Operator review tracking
     is_manually_edited = models.BooleanField(default=False)
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -182,7 +172,7 @@ class Document(models.Model):
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
 
-    # --- SharePoint filing result ---
+    # SharePoint filing telemetry
     sharepoint_folder_path = models.CharField(max_length=500, blank=True)
     sharepoint_item_id = models.CharField(max_length=255, blank=True)
     sharepoint_web_url = models.URLField(max_length=1000, blank=True)
@@ -211,6 +201,11 @@ class Document(models.Model):
 
     def __str__(self):
         return f"{self.original_filename} ({self.get_status_display()})"
+
+    @property
+    def has_temp_file(self) -> bool:
+        """Verifies local file presence safely."""
+        return bool(self.temp_file and self.temp_file.storage.exists(self.temp_file.name))
 
     @property
     def needs_attention(self):
@@ -250,20 +245,47 @@ class Document(models.Model):
             metadata=metadata or {},
         )
 
-    def purge_temp_file(self):
-        """Safely removes the transient local file from storage once filed."""
+    def purge_temp_file(self, force: bool = False):
+        """
+        Safely removes transient file. Only executes if the document
+        has been confirmed filed to SharePoint, or if force=True.
+        """
+        if self.status != self.Status.FILED and not force:
+            # Protect unfiled files against accidental purging during retry/errors
+            return
+
         if self.temp_file:
             storage = self.temp_file.storage
             path = self.temp_file.name
-            if storage.exists(path):
-                storage.delete(path)
+            try:
+                if storage.exists(path):
+                    storage.delete(path)
+            except Exception:
+                pass
             self.temp_file = None
             self.save(update_fields=["temp_file"])
 
+    def clean_sharepoint_path(self, base_root: str = "Scanned Documents") -> str:
+        """
+        Generates a sanitized folder path for SharePoint, eliminating invalid characters
+        and ensuring fallback values when AI classification did not succeed.
+        """
+        def sanitize_segment(text: str, fallback: str) -> str:
+            val = (text or "").strip()
+            # SharePoint forbidden characters: ~ " # % & * : < > ? / \ { | }
+            val = re.sub(r'[\~\"\#\%\&\*\:\<\>\?\/\\\{\|\}]', '_', val)
+            val = re.sub(r'\s+', ' ', val).strip('. ')
+            return val or fallback
+
+        company = sanitize_segment(self.company_name, "Unsorted Company")
+        year = str(self.document_year) if self.document_year else str(timezone.now().year)
+        cat_name = sanitize_segment(self.category.name if self.category else "Uncategorized", "General")
+
+        root = sanitize_segment(base_root, "Scanned Documents")
+        return f"{root}/{company}/{year}/{cat_name}".strip("/")
+
 
 class ProcessingLog(models.Model):
-    """Append-only audit trail of every step a document goes through."""
-
     class Step(models.TextChoices):
         UPLOADED = "uploaded", "Uploaded"
         VALIDATED = "validated", "Validated"
@@ -278,14 +300,8 @@ class ProcessingLog(models.Model):
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="logs")
     step = models.CharField(max_length=25, choices=Step.choices)
     message = models.TextField(blank=True)
-    duration_ms = models.PositiveIntegerField(
-        null=True, blank=True, help_text="Step latency in milliseconds."
-    )
-    metadata = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Telemetry (e.g. token counts, model name, HTTP codes).",
-    )
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
     actor = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
     )
@@ -299,8 +315,6 @@ class ProcessingLog(models.Model):
 
 
 class SystemConfiguration(models.Model):
-    """Runtime dynamic settings for AI thresholds and SharePoint destinations."""
-
     auto_file_threshold = models.FloatField(
         default=0.80,
         help_text="Minimum AI confidence score (0.00 - 1.00) required to auto-file to SharePoint.",
@@ -308,13 +322,8 @@ class SystemConfiguration(models.Model):
     folder_template = models.CharField(
         max_length=255,
         default="/Documents/{company_name}/{document_year}/{category_name}",
-        help_text="Dynamic folder structure in SharePoint.",
     )
-    gemini_model = models.CharField(
-        max_length=60,
-        default="gemini-2.5-flash",
-        help_text="Active Gemini model ('gemini-2.5-flash' or 'gemini-2.5-pro').",
-    )
+    gemini_model = models.CharField(max_length=60, default="gemini-2.5-flash")
     delete_local_on_file = models.BooleanField(
         default=True,
         help_text="Delete temporary local file immediately after verified upload to SharePoint.",
@@ -330,4 +339,4 @@ class SystemConfiguration(models.Model):
         return config
 
     def __str__(self):
-        return f"DocuFlow Settings ({self.gemini_model}, auto-file: {self.auto_file_threshold})"
+        return f"DocuVault Settings ({self.gemini_model}, auto-file: {self.auto_file_threshold})"

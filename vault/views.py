@@ -12,21 +12,18 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
-
 from .forms import CategoryMergeForm, DocumentReviewForm, DocumentUploadForm
-from .models import Document, DocumentCategory, ProcessingLog, SystemConfiguration
+from .models import Document, DocumentCategory, ProcessingLog
 from .services import document_processor, msal_auth
-
+from django.views.decorators.http import require_http_methods
 logger = logging.getLogger("vault")
 User = get_user_model()
-
 
 # ==============================================================================
 # 1. MSAL / Microsoft 365 Authentication
 # ==============================================================================
 
 def login_view(request):
-    """Renders the login page with the Microsoft Entra ID authorization URL."""
     if request.user.is_authenticated:
         return redirect("dashboard")
     state = secrets.token_urlsafe(24)
@@ -35,9 +32,7 @@ def login_view(request):
     auth_url = msal_auth.build_auth_url(state)
     return render(request, "vault/login.html", {"auth_url": auth_url})
 
-
 def auth_callback(request):
-    """Handles the OAuth2 code callback from Microsoft 365."""
     if request.GET.get("error"):
         return render(
             request,
@@ -70,7 +65,6 @@ def auth_callback(request):
             {"error": "Microsoft identity token missing subject claim.", "auth_url": None},
         )
 
-    # Provision or update the Django user
     user, _ = User.objects.get_or_create(
         username=profile["oid"],
         defaults={"email": profile["email"], "first_name": profile["name"][:150]},
@@ -80,20 +74,13 @@ def auth_callback(request):
         user.first_name = profile["name"][:150]
         user.save(update_fields=["email", "first_name"])
 
-    # Store the user's Graph access token for delegated SharePoint operations
-    if "access_token" in token_result:
-        request.session["m365_access_token"] = token_result["access_token"]
-
     login(request, user)
     next_url = request.session.pop("next_url", None) or reverse("dashboard")
     return redirect(next_url)
 
-
 def logout_view(request):
-    """Signs out user and clears the session."""
     logout(request)
     return redirect("login")
-
 
 # ==============================================================================
 # 2. Main Dashboard & Queues
@@ -122,12 +109,10 @@ def dashboard(request):
         },
     )
 
-
 @login_required
 def upload_page(request):
     max_mb = getattr(settings, "MAX_UPLOAD_SIZE_MB", 25)
     return render(request, "vault/upload.html", {"MAX_UPLOAD_SIZE_MB": max_mb})
-
 
 def _apply_filters(request, qs):
     status = request.GET.get("status")
@@ -151,7 +136,6 @@ def _apply_filters(request, qs):
             | Q(ai_summary__icontains=query)
         )
     return qs
-
 
 @login_required
 def document_list(request):
@@ -182,18 +166,12 @@ def document_list(request):
     )
     return render(request, template, context)
 
-
 @login_required
 def review_queue(request):
     items = Document.objects.filter(
         status__in=[Document.Status.NEEDS_REVIEW, Document.Status.FAILED]
     ).select_related("category", "uploaded_by")
     return render(request, "vault/review_queue.html", {"items": items})
-
-
-# ==============================================================================
-# 3. Discovered Categories & Taxonomy Management
-# ==============================================================================
 
 @login_required
 def categories_list(request):
@@ -218,9 +196,8 @@ def categories_list(request):
         {"categories": categories, "merge_form": merge_form},
     )
 
-
 # ==============================================================================
-# 4. AJAX Endpoints & Document Intake
+# 3. AJAX Endpoints & Document Operations
 # ==============================================================================
 
 def _checksum(uploaded_file) -> str:
@@ -230,9 +207,7 @@ def _checksum(uploaded_file) -> str:
     uploaded_file.seek(0)
     return hasher.hexdigest()
 
-
 def _document_json(document: Document) -> dict:
-    """Helper to return consistent JSON state for Tailwind front end."""
     is_done = document.status in (
         Document.Status.FILED,
         Document.Status.NEEDS_REVIEW,
@@ -243,6 +218,7 @@ def _document_json(document: Document) -> dict:
         "id": document.pk,
         "filename": document.original_filename,
         "file_size": document.formatted_size,
+        "has_temp_file": document.has_temp_file,
         "status": document.status,
         "status_label": document.get_status_display(),
         "category": document.category.name if document.category else None,
@@ -260,14 +236,9 @@ def _document_json(document: Document) -> dict:
         "detail_url": reverse("api_document_detail", args=[document.pk]),
     }
 
-
 @login_required
 @require_POST
 def api_upload(request):
-    """
-    Intakes a single file from the frontend dropzone, performs checksum deduplication,
-    and initiates Gemini processing asynchronously or synchronously.
-    """
     form = DocumentUploadForm(request.POST, request.FILES)
     if not form.is_valid():
         errors = "; ".join(str(e) for field in form.errors.values() for e in field)
@@ -291,7 +262,7 @@ def api_upload(request):
         actor=request.user,
     )
 
-    # Check for identical duplicate file already filed in SharePoint
+    # Check for identical duplicate
     duplicate = (
         Document.objects.filter(checksum_sha256=checksum, status=Document.Status.FILED)
         .exclude(pk=document.pk)
@@ -308,24 +279,29 @@ def api_upload(request):
             actor=request.user,
         )
     else:
-        document_processor.process_document(document.pk)
+        # Run processing safely
+        try:
+            document_processor.process_document(document.pk)
+        except Exception as exc:
+            logger.exception("Initial processing error for document %s: %s", document.pk, exc)
+            document.mark(
+                Document.Status.NEEDS_REVIEW,
+                error_message=str(exc),
+                ai_summary="AI classification temporarily unavailable. Queued for manual review.",
+            )
 
     document.refresh_from_db()
     return JsonResponse(_document_json(document))
 
-
 @login_required
 @require_GET
 def api_document_status(request, pk):
-    """Lightweight polling endpoint queried by client JavaScript."""
     document = get_object_or_404(Document, pk=pk)
     return JsonResponse(_document_json(document))
-
 
 @login_required
 @require_GET
 def api_document_detail(request, pk):
-    """Renders the slide-over inspection modal containing audit logs and entities."""
     document = get_object_or_404(
         Document.objects.select_related("category", "uploaded_by", "reviewed_by").prefetch_related("logs"),
         pk=pk,
@@ -336,12 +312,10 @@ def api_document_detail(request, pk):
         {"doc": document, "logs": document.logs.all()},
     )
 
-
 @login_required
 def api_review_document(request, pk):
     """
-    GET: Returns the pre-filled review modal HTML.
-    POST: Saves operator verified metadata and files to SharePoint.
+    Handles operator manual metadata verification and filing to SharePoint.
     """
     document = get_object_or_404(Document, pk=pk)
 
@@ -353,7 +327,6 @@ def api_review_document(request, pk):
 
         reviewed_doc = form.save(commit=False)
 
-        # Handle category: either selected or newly created
         new_cat_name = form.cleaned_data.get("new_category_name")
         if new_cat_name:
             reviewed_doc.category = DocumentCategory.get_or_create_discovered(new_cat_name.strip())
@@ -361,7 +334,7 @@ def api_review_document(request, pk):
         reviewed_doc.is_manually_edited = True
         reviewed_doc.reviewed_by = request.user
         reviewed_doc.reviewed_at = timezone.now()
-        reviewed_doc.confidence_score = 1.0  # human-verified
+        reviewed_doc.confidence_score = 1.0
         reviewed_doc.save()
 
         if reviewed_doc.category:
@@ -373,14 +346,24 @@ def api_review_document(request, pk):
             actor=request.user,
         )
 
-        # File to SharePoint if requested
+        # File to SharePoint
         if form.cleaned_data.get("file_to_sharepoint_now", True):
-            document_processor.file_reviewed_document(reviewed_doc, actor=request.user)
+            if not reviewed_doc.has_temp_file:
+                return JsonResponse({
+                    "ok": False,
+                    "error": "The local scan file is not available on disk. Please re-upload the document."
+                }, status=400)
+
+            filing_success, err_msg = document_processor.file_reviewed_document(reviewed_doc, actor=request.user)
+            if not filing_success:
+                return JsonResponse({
+                    "ok": False,
+                    "error": f"SharePoint Filing Error: {err_msg}"
+                }, status=502)
 
         reviewed_doc.refresh_from_db()
         return JsonResponse(_document_json(reviewed_doc))
 
-    # GET request: render the modal form
     form = DocumentReviewForm(instance=document)
     return render(
         request,
@@ -388,29 +371,35 @@ def api_review_document(request, pk):
         {"doc": document, "form": form},
     )
 
-
 @login_required
 @require_POST
 def api_retry_document(request, pk):
     document = get_object_or_404(Document, pk=pk)
-    if document.status != Document.Status.FAILED:
-        return JsonResponse({"ok": False, "error": "Only failed documents can be retried."}, status=400)
-    if not document.temp_file:
-        return JsonResponse({"ok": False, "error": "Local temp file was purged — please re-upload."}, status=400)
+    if document.status not in (Document.Status.FAILED, Document.Status.NEEDS_REVIEW):
+        return JsonResponse({"ok": False, "error": "Only unfiled documents can be retried."}, status=400)
+    if not document.has_temp_file:
+        return JsonResponse({"ok": False, "error": "Local scan was purged — please re-upload."}, status=400)
 
-    document.log_step(ProcessingLog.Step.RETRIED, "Manual retry initiated by user.", actor=request.user)
+    document.log_step(ProcessingLog.Step.RETRIED, "Manual retry initiated by operator.", actor=request.user)
     document_processor.process_document(document.pk)
     document.refresh_from_db()
     return JsonResponse(_document_json(document))
 
 
 @login_required
-@require_POST
+@require_http_methods(["POST", "DELETE"])
 def api_delete_document(request, pk):
     document = get_object_or_404(Document, pk=pk)
-    if document.status == Document.Status.FILED:
-        return JsonResponse({"ok": False, "error": "Filed documents cannot be deleted here. Remove them in SharePoint."}, status=400)
 
-    document.purge_temp_file()
+    if document.status == Document.Status.FILED:
+        return JsonResponse(
+            {"ok": False, "error": "Filed documents cannot be discarded here. Delete them in SharePoint."},
+            status=400,
+        )
+
+    # Clean local disk scan safely
+    document.purge_temp_file(force=True)
+    doc_id = document.pk
     document.delete()
-    return JsonResponse({"ok": True})
+
+    return JsonResponse({"ok": True, "id": doc_id, "message": "Document discarded successfully."})

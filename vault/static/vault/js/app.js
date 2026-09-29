@@ -1,7 +1,26 @@
 /**
  * DocuVault AI — Core Client Engine
- * Handles CSRF injection, standard fetch wrapper, and animated Toast notifications.
+ * Handles CSRF injection, standard fetch wrapper, animated Toast notifications,
+ * and global document operations (discard / delete).
  */
+
+// Helper to reliably extract Django CSRF cookie
+function getCsrfToken() {
+  if (window.CSRF_TOKEN) return window.CSRF_TOKEN;
+
+  if (document.cookie && document.cookie !== "") {
+    const cookies = document.cookie.split(";");
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.startsWith("csrftoken=")) {
+        return decodeURIComponent(cookie.substring("csrftoken=".length));
+      }
+    }
+  }
+
+  const domToken = document.querySelector("[name=csrfmiddlewaretoken]")?.value;
+  return domToken || "";
+}
 
 async function dvFetch(url, options = {}) {
   const opts = {
@@ -14,7 +33,10 @@ async function dvFetch(url, options = {}) {
   };
 
   if (opts.method !== "GET") {
-    opts.headers["X-CSRFToken"] = window.CSRF_TOKEN || "";
+    const token = getCsrfToken();
+    if (token) {
+      opts.headers["X-CSRFToken"] = token;
+    }
   }
 
   try {
@@ -22,14 +44,61 @@ async function dvFetch(url, options = {}) {
     const contentType = res.headers.get("content-type") || "";
 
     if (contentType.includes("application/json")) {
-      return { status: res.status, data: await res.json() };
+      return { status: res.status, data: await res.json(), ok: res.ok };
     }
-    return { status: res.status, data: await res.text() };
+    return { status: res.status, data: await res.text(), ok: res.ok };
   } catch (err) {
     console.error("dvFetch network failure:", err);
     throw err;
   }
 }
+
+// Global Discard Document action
+window.discardDocument = async function (docId) {
+  if (!confirm("Are you sure you want to discard this document? The local temporary scan will be permanently deleted.")) {
+    return;
+  }
+
+  try {
+    const { status, data, ok } = await dvFetch(`/api/documents/${docId}/delete/`, {
+      method: "POST",
+    });
+
+    if (ok && data.ok) {
+      dvToast("Document discarded successfully.", "info");
+
+      // 1. Close inspection/review modal if open
+      if (typeof closeDocModal === "function") {
+        closeDocModal();
+      }
+
+      // 2. Remove document rows/cards from the DOM across queues, dropzones, and tables
+      const targets = document.querySelectorAll(
+        `[data-doc-id="${docId}"], [data-id="${docId}"], #doc-row-${docId}, tr[data-document-id="${docId}"]`
+      );
+      targets.forEach((el) => {
+        el.classList.add("opacity-0", "scale-95", "transition-all", "duration-200");
+        setTimeout(() => el.remove(), 200);
+      });
+
+      // 3. Decrement review queue badge counters
+      const badge = document.getElementById("review-queue-badge");
+      if (badge) {
+        const count = parseInt(badge.textContent, 10) || 0;
+        if (count > 1) {
+          badge.textContent = count - 1;
+        } else {
+          badge.remove();
+        }
+      }
+    } else {
+      dvToast(data.error || "Failed to discard document.", "error");
+    }
+  } catch (err) {
+    console.error("Discard error:", err);
+    dvToast("An error occurred while discarding the document.", "error");
+  }
+};
 
 function dvToast(message, variant = "info") {
   const host = document.getElementById("toast-host");
@@ -65,12 +134,10 @@ function dvToast(message, variant = "info") {
   host.appendChild(el);
   if (window.lucide) lucide.createIcons({ root: el });
 
-  // Animate in
   requestAnimationFrame(() => {
     el.classList.remove("translate-y-3", "opacity-0");
   });
 
-  // Auto-dismiss after 5.5 seconds
   setTimeout(() => {
     if (el.parentNode) {
       el.classList.add("opacity-0", "translate-y-2");

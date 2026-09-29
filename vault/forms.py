@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from django import forms
 from django.conf import settings
 from .models import Document, DocumentCategory
@@ -6,17 +7,23 @@ from .models import Document, DocumentCategory
 # Standard Tailwind CSS classes for form inputs
 TAILWIND_INPUT = (
     "w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-slate-100 "
-    "placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 "
-    "focus:border-indigo-500 transition"
+    "text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition"
 )
 TAILWIND_SELECT = (
-    "w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-slate-100 "
-    "text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition"
+    "w-full appearance-none px-3.5 py-2.5 pr-8 rounded-xl bg-slate-900 border border-slate-700/80 text-slate-100 "
+    "text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition cursor-pointer"
 )
 TAILWIND_CHECKBOX = (
     "w-4 h-4 text-indigo-600 bg-slate-900 border-slate-700 rounded "
     "focus:ring-indigo-500 focus:ring-offset-slate-950 transition"
 )
+
+
+def get_year_choices():
+    """Generates dropdown year choices: 5 years in future down to 25 years in past."""
+    current_year = datetime.now().year
+    years = [(y, str(y)) for y in range(current_year + 5, current_year - 25, -1)]
+    return [("", "— Select Document Year —")] + years
 
 
 class DocumentUploadForm(forms.ModelForm):
@@ -41,7 +48,6 @@ class DocumentUploadForm(forms.ModelForm):
     def clean_temp_file(self):
         f = self.cleaned_data["temp_file"]
 
-        # Default allowed extensions if not defined in settings
         allowed_extensions = getattr(
             settings,
             "ALLOWED_UPLOAD_EXTENSIONS",
@@ -69,14 +75,14 @@ class DocumentUploadForm(forms.ModelForm):
 class DocumentReviewForm(forms.ModelForm):
     """
     Form for human verification in the review queue or inspection modal.
-    Allows picking an existing category, discovering a new one, correcting
-    dates/company name, and triggering SharePoint upload.
+    Features native HTML5 date picker and structured year dropdown.
     """
 
     category = forms.ModelChoiceField(
         queryset=DocumentCategory.objects.none(),
         required=False,
         label="Existing Category",
+        empty_label="— Select Detected Category —",
         widget=forms.Select(attrs={"class": TAILWIND_SELECT}),
     )
     new_category_name = forms.CharField(
@@ -86,6 +92,31 @@ class DocumentReviewForm(forms.ModelForm):
         help_text="Leave blank to use the selected category above.",
         widget=forms.TextInput(
             attrs={"class": TAILWIND_INPUT, "placeholder": "e.g., Equipment Lease Agreement"}
+        ),
+    )
+    document_date = forms.DateField(
+        required=False,
+        label="Formal Document Date",
+        widget=forms.DateInput(
+            format="%Y-%m-%d",
+            attrs={
+                "class": TAILWIND_INPUT,
+                "type": "date",
+                "id": "id_document_date",
+            },
+        ),
+    )
+    document_year = forms.TypedChoiceField(
+        choices=get_year_choices,
+        coerce=int,
+        empty_value=None,
+        required=False,
+        label="Document Year",
+        widget=forms.Select(
+            attrs={
+                "class": TAILWIND_SELECT,
+                "id": "id_document_year",
+            }
         ),
     )
     file_to_sharepoint_now = forms.BooleanField(
@@ -108,12 +139,6 @@ class DocumentReviewForm(forms.ModelForm):
             "company_name": forms.TextInput(
                 attrs={"class": TAILWIND_INPUT, "placeholder": "e.g., Acme Corporation"}
             ),
-            "document_date": forms.DateInput(
-                attrs={"class": TAILWIND_INPUT, "type": "date"}
-            ),
-            "document_year": forms.NumberInput(
-                attrs={"class": TAILWIND_INPUT, "placeholder": "YYYY", "min": 1900, "max": 2100}
-            ),
             "ai_summary": forms.Textarea(
                 attrs={
                     "class": TAILWIND_INPUT,
@@ -135,13 +160,18 @@ class DocumentReviewForm(forms.ModelForm):
         if not category and not new_category_name:
             raise forms.ValidationError("Please select an existing category or enter a new one.")
 
+        # UX enhancement: auto-populate Year from Date if Year wasn't manually selected
+        doc_date = cleaned_data.get("document_date")
+        doc_year = cleaned_data.get("document_year")
+        if doc_date and not doc_year:
+            cleaned_data["document_year"] = doc_date.year
+
         return cleaned_data
 
 
 class CategoryMergeForm(forms.Form):
     """
-    Consolidates near-duplicate open-ended categories discovered by AI
-    (e.g., merging 'Tax 2024' into 'Tax Return').
+    Consolidates near-duplicate open-ended categories discovered by AI.
     """
 
     source_category = forms.ModelChoiceField(
