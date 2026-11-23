@@ -1,58 +1,59 @@
 {% load static %}
-<div class="glass-card rounded-2xl overflow-hidden border border-slate-800 shadow-xl">
+<div class="light-card rounded-2xl overflow-hidden">
 
   <!-- ================= Mobile View: Touch Cards ================= -->
-  <div class="sm:hidden divide-y divide-slate-800/80">
+  <div class="md:hidden divide-y divide-slate-100">
     {% for doc in page_obj %}
       <div id="doc-row-{{ doc.pk }}" data-doc-id="{{ doc.pk }}"
-           class="p-4 hover:bg-slate-900/50 cursor-pointer transition active:bg-slate-900"
+           class="p-4 hover:bg-slate-50 cursor-pointer transition active:bg-slate-100"
            onclick="{% if doc.status == 'needs_review' or doc.status == 'failed' %}openReviewModal({{ doc.pk }}){% else %}openDocModal({{ doc.pk }}){% endif %}">
         <div class="flex items-start justify-between gap-2">
           <div class="flex items-center space-x-2.5 min-w-0">
-            <div class="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
+            <div class="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
               {% if doc.file_extension == '.pdf' %}
-                <i data-lucide="file-text" class="w-4 h-4 text-rose-400"></i>
-              {% elif doc.file_extension in '.png,.jpg,.jpeg,.webp' %}
-                <i data-lucide="image" class="w-4 h-4 text-sky-400"></i>
+                <i data-lucide="file-text" class="w-4 h-4 text-rose-500"></i>
+              {% elif doc.file_extension in '.png,.jpg,.jpeg,.webp,.tif,.tiff' %}
+                <i data-lucide="image" class="w-4 h-4 text-sky-500"></i>
               {% else %}
-                <i data-lucide="file" class="w-4 h-4 text-indigo-400"></i>
+                <i data-lucide="file" class="w-4 h-4 text-indigo-500"></i>
               {% endif %}
             </div>
             <div class="min-w-0">
-              <p class="font-bold text-xs text-slate-100 truncate">{{ doc.original_filename }}</p>
-              <p class="text-[10px] text-slate-400 mt-0.5">{{ doc.formatted_size }} · {{ doc.created_at|date:"M j" }}</p>
+              <p class="font-bold text-xs text-slate-900 truncate">{{ doc.original_filename }}</p>
+              <p class="text-[11px] text-slate-500 mt-0.5">{{ doc.formatted_size }} · {{ doc.created_at|date:"M j, Y" }}</p>
             </div>
           </div>
 
-          <!-- Status badge -->
           <div class="shrink-0">
             {% if doc.status == 'filed' %}
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Filed</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Filed</span>
             {% elif doc.status == 'needs_review' %}
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">Review</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Review</span>
             {% elif doc.status == 'failed' %}
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">Failed</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Failed</span>
+            {% elif doc.status == 'pending' %}
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">Pending</span>
             {% else %}
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">Active</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">Processing</span>
             {% endif %}
           </div>
         </div>
 
-        <div class="mt-2.5 flex items-center justify-between text-[11px] text-slate-400 bg-slate-950/50 px-2.5 py-1.5 rounded-lg border border-slate-800/60">
+        <div class="mt-2.5 flex items-center justify-between text-[11px] text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200/70">
           <span class="truncate"><strong>Org:</strong> {{ doc.company_name|default:"—" }}</span>
-          <span class="text-indigo-400 font-medium shrink-0 ml-2">{{ doc.category.name|default:"Unclassified" }}</span>
+          <span class="text-indigo-600 font-semibold shrink-0 ml-2">{{ doc.category.name|default:"Unclassified" }}</span>
         </div>
       </div>
     {% empty %}
-      <div class="p-8 text-center text-xs text-slate-400">No documents found.</div>
+      <div class="p-10 text-center text-xs text-slate-500">No documents found.</div>
     {% endfor %}
   </div>
 
   <!-- ================= Desktop View: Full Table ================= -->
-  <div class="hidden sm:block overflow-x-auto">
+  <div class="hidden md:block overflow-x-auto">
     <table class="w-full text-left border-collapse text-sm">
       <thead>
-        <tr class="border-b border-slate-800 bg-slate-900/70 text-slate-400 text-xs font-semibold uppercase tracking-wider">
+        <tr class="border-b border-slate-200 bg-slate-50/90 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
           <th class="px-5 py-3.5">Document File</th>
           <th class="px-4 py-3.5">Category</th>
           <th class="px-4 py-3.5">Company</th>
@@ -63,99 +64,112 @@
           <th class="px-4 py-3.5 text-right">Actions</th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-slate-800/80">
+      <tbody class="divide-y divide-slate-100">
         {% for doc in page_obj %}
-          <tr id="doc-row-{{ doc.pk }}" data-doc-id="{{ doc.pk }}" class="hover:bg-slate-900/40 transition-colors group">
-            <td class="px-5 py-4 cursor-pointer" onclick="openDocModal({{ doc.pk }})">
+          <tr id="doc-row-{{ doc.pk }}" data-doc-id="{{ doc.pk }}" class="hover:bg-slate-50/90 transition-colors group">
+            <td class="px-5 py-3.5 cursor-pointer" onclick="openDocModal({{ doc.pk }})">
               <div class="flex items-center space-x-3">
-                <div class="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700/80 flex items-center justify-center shrink-0 text-slate-300 group-hover:border-indigo-500/50 transition">
+                <div class="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 group-hover:border-indigo-300 group-hover:bg-indigo-50 transition">
                   {% if doc.file_extension == '.pdf' %}
-                    <i data-lucide="file-text" class="w-4 h-4 text-rose-400"></i>
-                  {% elif doc.file_extension in '.png,.jpg,.jpeg,.webp' %}
-                    <i data-lucide="image" class="w-4 h-4 text-sky-400"></i>
+                    <i data-lucide="file-text" class="w-4 h-4 text-rose-500"></i>
+                  {% elif doc.file_extension in '.png,.jpg,.jpeg,.webp,.tif,.tiff' %}
+                    <i data-lucide="image" class="w-4 h-4 text-sky-500"></i>
                   {% else %}
-                    <i data-lucide="file" class="w-4 h-4 text-indigo-400"></i>
+                    <i data-lucide="file" class="w-4 h-4 text-indigo-500"></i>
                   {% endif %}
                 </div>
-                <div class="min-w-0 max-w-[180px] md:max-w-xs">
-                  <span class="font-semibold text-slate-100 group-hover:text-indigo-400 transition truncate block">
+                <div class="min-w-0 max-w-[200px] lg:max-w-xs">
+                  <span class="font-semibold text-xs sm:text-sm text-slate-800 group-hover:text-indigo-600 transition truncate block">
                     {{ doc.original_filename }}
                   </span>
-                  <span class="text-[11px] text-slate-500">{{ doc.formatted_size }}</span>
+                  <span class="text-[11px] text-slate-500 block truncate">
+                    {{ doc.formatted_size }}{% if doc.document_title %} · {{ doc.document_title }}{% endif %}
+                  </span>
                 </div>
               </div>
             </td>
 
-            <td class="px-4 py-4">
+            <td class="px-4 py-3.5">
               {% if doc.category %}
-                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-indigo-500/10 text-indigo-300 border-indigo-500/20">
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-indigo-50 text-indigo-700 border-indigo-200">
                   {{ doc.category.name }}
                 </span>
               {% else %}
-                <span class="text-xs text-slate-500 italic">Uncategorized</span>
+                <span class="text-xs text-slate-400 italic">Uncategorized</span>
               {% endif %}
             </td>
 
-            <td class="px-4 py-4 text-slate-300 font-medium truncate max-w-[140px]">
+            <td class="px-4 py-3.5 text-xs sm:text-sm text-slate-700 font-medium truncate max-w-[150px]">
               {{ doc.company_name|default:"—" }}
             </td>
 
-            <td class="px-4 py-4 text-xs text-slate-400 font-mono">
+            <td class="px-4 py-3.5 text-xs text-slate-600 font-mono">
               {{ doc.document_year|default:"—" }}
             </td>
 
-            <td class="px-4 py-4">
+            <td class="px-4 py-3.5">
               {% if doc.status == 'filed' %}
-                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                   <i data-lucide="check" class="w-3.5 h-3.5"></i>
                   <span>Filed</span>
                 </span>
               {% elif doc.status == 'needs_review' %}
-                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <span class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                   <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
                   <span>Review</span>
                 </span>
               {% elif doc.status == 'failed' %}
-                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                <span class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
                   <i data-lucide="x-circle" class="w-3.5 h-3.5"></i>
                   <span>Failed</span>
                 </span>
+              {% elif doc.status == 'pending' %}
+                <span class="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                  <span>Pending</span>
+                </span>
               {% else %}
-                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20 animate-pulse">
+                <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                  <span class="w-1.5 h-1.5 rounded-full bg-sky-500 animate-ping"></span>
                   <span>Processing</span>
                 </span>
               {% endif %}
             </td>
 
-            <td class="px-4 py-4">
+            <td class="px-4 py-3.5">
               {% if doc.confidence_score is not None %}
-                <span class="text-xs font-bold {% if doc.confidence_score >= 0.8 %}text-emerald-400{% elif doc.confidence_score >= 0.6 %}text-amber-400{% else %}text-rose-400{% endif %}">
+                <span class="text-xs font-bold {% if doc.confidence_score >= 0.8 %}text-emerald-600{% elif doc.confidence_score >= 0.6 %}text-amber-600{% else %}text-rose-600{% endif %}">
                   {{ doc.confidence_percent }}%
                 </span>
               {% else %}
-                <span class="text-xs text-slate-500">—</span>
+                <span class="text-xs text-slate-400">—</span>
               {% endif %}
             </td>
 
-            <td class="px-4 py-4 text-xs text-slate-400">
+            <td class="px-4 py-3.5 text-xs text-slate-500 whitespace-nowrap">
               {{ doc.created_at|date:"M j, Y" }}
             </td>
 
             <!-- Quick Actions -->
-            <td class="px-4 py-4 text-right">
-              <div class="flex items-center justify-end space-x-2">
+            <td class="px-4 py-3.5 text-right">
+              <div class="flex items-center justify-end space-x-1.5">
                 {% if doc.status == 'needs_review' or doc.status == 'failed' %}
                   <button type="button" onclick="openReviewModal({{ doc.pk }})" title="Review & File"
-                          class="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition">
+                          class="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition">
                     <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
                   </button>
                   <button type="button" onclick="deleteDoc({{ doc.pk }})" title="Discard"
-                          class="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 border border-slate-700/80 transition">
+                          class="p-1.5 rounded-lg bg-white hover:bg-rose-50 text-slate-500 hover:text-rose-600 border border-slate-200 transition">
                     <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                   </button>
                 {% else %}
+                  {% if doc.sharepoint_web_url %}
+                    <a href="{{ doc.sharepoint_web_url }}" target="_blank" rel="noopener noreferrer" title="Open in SharePoint"
+                       class="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition">
+                      <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                    </a>
+                  {% endif %}
                   <button type="button" onclick="openDocModal({{ doc.pk }})" title="Inspect"
-                          class="p-1.5 rounded-lg bg-slate-900 hover:bg-indigo-500/10 text-slate-400 hover:text-indigo-400 border border-slate-700/80 transition">
+                          class="p-1.5 rounded-lg bg-white hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 border border-slate-200 transition">
                     <i data-lucide="eye" class="w-3.5 h-3.5"></i>
                   </button>
                 {% endif %}
@@ -164,7 +178,7 @@
           </tr>
         {% empty %}
           <tr>
-            <td colspan="8" class="px-4 py-12 text-center text-xs text-slate-400">No documents match these filters.</td>
+            <td colspan="8" class="px-4 py-12 text-center text-xs text-slate-500">No documents match these filters.</td>
           </tr>
         {% endfor %}
       </tbody>
@@ -174,16 +188,18 @@
 
 <!-- Responsive Pagination Controls -->
 {% if page_obj.has_other_pages %}
-  <div class="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 px-1 text-xs text-slate-400">
-    <span>Page <strong class="text-slate-200">{{ page_obj.number }}</strong> of {{ page_obj.paginator.num_pages }}</span>
+  <div class="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 px-1 text-xs text-slate-500">
+    <span>Page <strong class="text-slate-800">{{ page_obj.number }}</strong> of {{ page_obj.paginator.num_pages }}</span>
     <div class="flex items-center space-x-2 w-full sm:w-auto justify-between sm:justify-end">
       {% if page_obj.has_previous %}
-        <button onclick="dvGoToPage({{ page_obj.previous_page_number }})" class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200">
+        <button type="button" onclick="dvGoToPage({{ page_obj.previous_page_number }})"
+                class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold transition">
           Previous
         </button>
       {% endif %}
       {% if page_obj.has_next %}
-        <button onclick="dvGoToPage({{ page_obj.next_page_number }})" class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200">
+        <button type="button" onclick="dvGoToPage({{ page_obj.next_page_number }})"
+                class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold transition">
           Next
         </button>
       {% endif %}

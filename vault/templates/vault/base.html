@@ -1,9 +1,9 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<html lang="en" class="h-full bg-slate-50 text-slate-900">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}DocuVault AI · Cognitive Document Intake{% endblock %}</title>
 
   <!-- Typography -->
@@ -15,13 +15,26 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      darkMode: 'class',
       theme: {
         extend: {
           fontFamily: {
             sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
             mono: ['"JetBrains Mono"', 'monospace'],
           },
+          keyframes: {
+            fadeUp: {
+              '0%': { opacity: '0', transform: 'translateY(10px)' },
+              '100%': { opacity: '1', transform: 'translateY(0)' },
+            },
+            floatSlow: {
+              '0%, 100%': { transform: 'translateY(0px)' },
+              '50%': { transform: 'translateY(-4px)' },
+            },
+          },
+          animation: {
+            'fade-up': 'fadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both',
+            'float-slow': 'floatSlow 3s ease-in-out infinite',
+          }
         }
       }
     }
@@ -32,172 +45,232 @@
   <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
   <link rel="stylesheet" href="{% static 'vault/css/custom.css' %}">
 
+  <style>
+    [x-cloak] { display: none !important; }
+    .light-card {
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 8px 24px -6px rgba(15, 23, 42, 0.05);
+    }
+    .light-sidebar {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(14px);
+      border-right: 1px solid #e2e8f0;
+    }
+  </style>
+
   <script>window.CSRF_TOKEN = "{{ csrf_token }}";</script>
   {% block extra_head %}{% endblock %}
 </head>
-<body class="h-full flex antialiased selection:bg-indigo-500 selection:text-white custom-scrollbar overflow-x-hidden" x-data="{ mobileMenuOpen: false }">
+<body class="h-full flex antialiased bg-slate-50 text-slate-900 selection:bg-indigo-600 selection:text-white overflow-x-hidden" x-data="{ mobileMenuOpen: false }">
 
   <!-- ================= Mobile Slide-Over Drawer ================= -->
-  <div x-show="mobileMenuOpen" 
-       class="fixed inset-0 z-50 md:hidden flex" 
-       x-cloak
-       style="display: none;">
+  <div x-show="mobileMenuOpen"
+       class="fixed inset-0 z-50 lg:hidden flex"
+       x-cloak>
     <!-- Backdrop -->
     <div x-show="mobileMenuOpen"
-         x-transition:enter="transition-opacity ease-linear duration-300"
+         x-transition:enter="transition-opacity ease-out duration-250"
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100"
-         x-transition:leave="transition-opacity ease-linear duration-300"
+         x-transition:leave="transition-opacity ease-in duration-200"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
-         class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm"
+         class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm"
          @click="mobileMenuOpen = false"></div>
 
     <!-- Drawer Panel -->
     <div x-show="mobileMenuOpen"
-         x-transition:enter="transition ease-in-out duration-300 transform"
+         x-transition:enter="transition ease-out duration-300 transform"
          x-transition:enter-start="-translate-x-full"
          x-transition:enter-end="translate-x-0"
-         x-transition:leave="transition ease-in-out duration-300 transform"
+         x-transition:leave="transition ease-in duration-200 transform"
          x-transition:leave-start="translate-x-0"
          x-transition:leave-end="-translate-x-full"
-         class="relative max-w-xs w-full bg-slate-900 border-r border-slate-800 p-6 flex-1 flex flex-col justify-between shadow-2xl z-10">
-      
+         class="relative max-w-xs w-full bg-white border-r border-slate-200 p-6 flex-1 flex flex-col justify-between shadow-2xl z-10">
+
       <div class="space-y-6">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2.5">
-            <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-xs">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-sky-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
               <i data-lucide="layers" class="w-4 h-4"></i>
             </div>
-            <span class="font-bold text-base text-white">DocuVault</span>
+            <div>
+              <span class="font-bold text-base text-slate-900 block leading-tight">DocuVault</span>
+              <span class="text-[10px] font-semibold text-indigo-600 uppercase tracking-wider">AI · M365</span>
+            </div>
           </div>
-          <button @click="mobileMenuOpen = false" class="p-1 rounded-lg text-slate-400 hover:text-white">
+          <button @click="mobileMenuOpen = false" aria-label="Close navigation"
+                  class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
             <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
 
-        <!-- Links -->
+        <!-- Mobile Nav Links -->
+        {% url 'dashboard' as m_dash %}
+        {% url 'upload' as m_upload %}
+        {% url 'document_list' as m_docs %}
+        {% url 'review_queue' as m_review %}
+        {% url 'categories_list' as m_cats %}
+
         <nav class="space-y-1.5 text-sm">
-          <a href="{% url 'dashboard' %}" class="flex items-center space-x-3 px-3 py-2.5 rounded-xl font-medium text-slate-300 hover:bg-slate-800">
-            <i data-lucide="layout-dashboard" class="w-4 h-4 text-indigo-400"></i>
+          <a href="{{ m_dash }}" @click="mobileMenuOpen = false"
+             class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition {% if request.path == m_dash %}bg-indigo-50 text-indigo-700 font-semibold{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-900{% endif %}">
+            <i data-lucide="layout-dashboard" class="w-4 h-4 text-indigo-600"></i>
             <span>Dashboard</span>
           </a>
-          <a href="{% url 'upload' %}" class="flex items-center space-x-3 px-3 py-2.5 rounded-xl font-medium text-slate-300 hover:bg-slate-800">
-            <i data-lucide="upload-cloud" class="w-4 h-4 text-indigo-400"></i>
+          <a href="{{ m_upload }}" @click="mobileMenuOpen = false"
+             class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition {% if request.path == m_upload %}bg-indigo-50 text-indigo-700 font-semibold{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-900{% endif %}">
+            <i data-lucide="upload-cloud" class="w-4 h-4 text-indigo-600"></i>
             <span>Upload Scans</span>
           </a>
-          <a href="{% url 'document_list' %}" class="flex items-center space-x-3 px-3 py-2.5 rounded-xl font-medium text-slate-300 hover:bg-slate-800">
-            <i data-lucide="files" class="w-4 h-4 text-indigo-400"></i>
+          <a href="{{ m_docs }}" @click="mobileMenuOpen = false"
+             class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition {% if request.path == m_docs %}bg-indigo-50 text-indigo-700 font-semibold{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-900{% endif %}">
+            <i data-lucide="files" class="w-4 h-4 text-indigo-600"></i>
             <span>All Documents</span>
           </a>
-          <a href="{% url 'review_queue' %}" class="flex items-center justify-between px-3 py-2.5 rounded-xl font-medium text-slate-300 hover:bg-slate-800">
+          <a href="{{ m_review }}" @click="mobileMenuOpen = false"
+             class="flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium transition {% if request.path == m_review %}bg-amber-50 text-amber-800 font-semibold{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-900{% endif %}">
             <div class="flex items-center space-x-3">
-              <i data-lucide="alert-circle" class="w-4 h-4 text-amber-400"></i>
+              <i data-lucide="alert-circle" class="w-4 h-4 text-amber-500"></i>
               <span>Review Queue</span>
             </div>
-            {% if review_queue_count %}
-              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-300">{{ review_queue_count }}</span>
+            {% if review_queue_count or failed_count %}
+              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800">
+                {{ review_queue_count|default:0|add:failed_count|default:0 }}
+              </span>
             {% endif %}
           </a>
-          <a href="{% url 'categories_list' %}" class="flex items-center space-x-3 px-3 py-2.5 rounded-xl font-medium text-slate-300 hover:bg-slate-800">
-            <i data-lucide="tags" class="w-4 h-4 text-indigo-400"></i>
+          <a href="{{ m_cats }}" @click="mobileMenuOpen = false"
+             class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition {% if request.path == m_cats %}bg-indigo-50 text-indigo-700 font-semibold{% else %}text-slate-600 hover:bg-slate-100 hover:text-slate-900{% endif %}">
+            <i data-lucide="tags" class="w-4 h-4 text-indigo-600"></i>
             <span>Categories</span>
           </a>
         </nav>
       </div>
 
       <!-- User footer inside drawer -->
-      <div class="pt-4 border-t border-slate-800 flex items-center justify-between">
-        <span class="text-xs text-slate-300 truncate max-w-[160px]">{{ user.first_name|default:user.username }}</span>
-        <a href="{% url 'logout' %}" class="text-xs text-rose-400 font-semibold">Sign out</a>
+      <div class="pt-4 border-t border-slate-200 flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <p class="text-xs font-semibold text-slate-800 truncate">{{ user.first_name|default:user.username }}</p>
+          <p class="text-[11px] text-slate-500 truncate">{{ user.email|default:"m365.user" }}</p>
+        </div>
+        <form method="post" action="{% url 'logout' %}">
+          {% csrf_token %}
+          <button type="submit" class="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 transition">
+            Sign out
+          </button>
+        </form>
       </div>
     </div>
   </div>
 
   <!-- ================= Desktop Sidebar ================= -->
-  <aside class="hidden md:flex md:flex-col w-64 shrink-0 glass-nav z-30">
-    <div class="px-6 py-6 border-b border-slate-800/80 flex items-center justify-between">
+  <aside class="hidden lg:flex lg:flex-col w-64 shrink-0 light-sidebar z-30">
+    <div class="px-6 py-5 border-b border-slate-200/80 flex items-center justify-between">
       <a href="{% url 'dashboard' %}" class="flex items-center space-x-3 group">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-sky-400 p-[1px] shadow-lg shadow-indigo-500/25">
-          <div class="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center">
-            <i data-lucide="layers" class="w-5 h-5 text-indigo-400"></i>
-          </div>
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-sky-500 flex items-center justify-center shadow-md shadow-indigo-500/25 group-hover:scale-105 transition-transform duration-200">
+          <i data-lucide="layers" class="w-5 h-5 text-white"></i>
         </div>
         <div>
-          <span class="text-base font-bold tracking-tight text-white block">DocuVault</span>
-          <span class="text-[11px] font-semibold text-indigo-400 block tracking-wider uppercase">AI · M365 Ingest</span>
+          <span class="text-base font-extrabold tracking-tight text-slate-900 block">DocuVault</span>
+          <span class="text-[10px] font-bold text-indigo-600 block tracking-wider uppercase">AI · M365 Ingest</span>
         </div>
       </a>
     </div>
 
-    <nav class="flex-1 px-3 py-6 space-y-1.5 text-sm">
+    <nav class="flex-1 px-3 py-5 space-y-1.5 text-sm">
       {% url 'dashboard' as u_dash %}
       {% url 'upload' as u_upload %}
       {% url 'document_list' as u_docs %}
       {% url 'review_queue' as u_review %}
       {% url 'categories_list' as u_cats %}
 
-      <a href="{{ u_dash }}" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition-all {% if request.path == u_dash %}bg-indigo-600/15 text-indigo-300 border border-indigo-500/30{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-900/60{% endif %}">
-        <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+      <a href="{{ u_dash }}"
+         class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition-all duration-200 {% if request.path == u_dash %}bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-sm font-semibold{% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-100/80{% endif %}">
+        <i data-lucide="layout-dashboard" class="w-4 h-4 {% if request.path == u_dash %}text-indigo-600{% endif %}"></i>
         <span>Dashboard</span>
       </a>
-      <a href="{{ u_upload }}" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition-all {% if request.path == u_upload %}bg-indigo-600/15 text-indigo-300 border border-indigo-500/30{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-900/60{% endif %}">
-        <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+
+      <a href="{{ u_upload }}"
+         class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition-all duration-200 {% if request.path == u_upload %}bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-sm font-semibold{% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-100/80{% endif %}">
+        <i data-lucide="upload-cloud" class="w-4 h-4 {% if request.path == u_upload %}text-indigo-600{% endif %}"></i>
         <span>Upload Scans</span>
       </a>
-      <a href="{{ u_docs }}" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition-all {% if request.path == u_docs %}bg-indigo-600/15 text-indigo-300 border border-indigo-500/30{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-900/60{% endif %}">
-        <i data-lucide="files" class="w-4 h-4"></i>
+
+      <a href="{{ u_docs }}"
+         class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition-all duration-200 {% if request.path == u_docs %}bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-sm font-semibold{% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-100/80{% endif %}">
+        <i data-lucide="files" class="w-4 h-4 {% if request.path == u_docs %}text-indigo-600{% endif %}"></i>
         <span>All Documents</span>
       </a>
-      <a href="{{ u_review }}" class="flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium transition-all {% if request.path == u_review %}bg-amber-500/15 text-amber-300 border border-amber-500/30{% else %}text-slate-400 hover:text-amber-300 hover:bg-slate-900/60{% endif %}">
+
+      <a href="{{ u_review }}"
+         class="flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium transition-all duration-200 {% if request.path == u_review %}bg-amber-50 text-amber-800 border border-amber-200 shadow-sm font-semibold{% else %}text-slate-600 hover:text-amber-700 hover:bg-amber-50/50{% endif %}">
         <div class="flex items-center space-x-3">
-          <i data-lucide="alert-circle" class="w-4 h-4"></i>
+          <i data-lucide="alert-circle" class="w-4 h-4 {% if request.path == u_review or review_queue_count %}text-amber-500{% endif %}"></i>
           <span>Review Queue</span>
         </div>
-        {% if review_queue_count %}
-          <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">{{ review_queue_count }}</span>
+        {% if review_queue_count or failed_count %}
+          <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+            {{ review_queue_count|default:0|add:failed_count|default:0 }}
+          </span>
         {% endif %}
       </a>
-      <a href="{{ u_cats }}" class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition-all {% if request.path == u_cats %}bg-indigo-600/15 text-indigo-300 border border-indigo-500/30{% else %}text-slate-400 hover:text-slate-100 hover:bg-slate-900/60{% endif %}">
-        <i data-lucide="tags" class="w-4 h-4"></i>
+
+      <a href="{{ u_cats }}"
+         class="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-medium transition-all duration-200 {% if request.path == u_cats %}bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-sm font-semibold{% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-100/80{% endif %}">
+        <i data-lucide="tags" class="w-4 h-4 {% if request.path == u_cats %}text-indigo-600{% endif %}"></i>
         <span>Categories</span>
       </a>
     </nav>
 
-    <div class="p-4 border-t border-slate-800/80 bg-slate-950/60">
+    <div class="p-4 border-t border-slate-200/80 bg-slate-50/70">
       {% if user.is_authenticated %}
-        <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center justify-between gap-2">
           <div class="flex items-center space-x-2.5 min-w-0">
-            <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs">
+            <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-sky-500 flex items-center justify-center text-white font-bold text-xs shadow-sm shrink-0">
               {{ user.first_name|default:user.username|slice:":1"|upper }}
             </div>
             <div class="min-w-0">
-              <p class="text-xs font-semibold text-slate-200 truncate">{{ user.first_name|default:user.username }}</p>
+              <p class="text-xs font-semibold text-slate-800 truncate">{{ user.first_name|default:user.username }}</p>
               <p class="text-[10px] text-slate-500 truncate">{{ user.email|default:"m365.user" }}</p>
             </div>
           </div>
-          <a href="{% url 'logout' %}" class="p-1.5 text-slate-400 hover:text-rose-400">
-            <i data-lucide="log-out" class="w-4 h-4"></i>
-          </a>
+          <form method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button type="submit" title="Sign out" aria-label="Sign out"
+                    class="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition">
+              <i data-lucide="log-out" class="w-4 h-4"></i>
+            </button>
+          </form>
         </div>
       {% endif %}
     </div>
   </aside>
 
   <!-- ================= Main Content Container ================= -->
-  <div class="flex-1 min-w-0 flex flex-col h-full overflow-y-auto custom-scrollbar">
+  <div class="flex-1 min-w-0 flex flex-col h-full overflow-y-auto relative">
+    <!-- Subtle Light Ambient Mesh -->
+    <div class="pointer-events-none fixed inset-x-0 top-0 h-72 bg-gradient-to-b from-indigo-50/70 via-sky-50/30 to-transparent -z-10"></div>
 
-    <!-- Mobile Top Header Bar -->
-    <header class="md:hidden flex items-center justify-between px-4 py-3 bg-slate-950/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-20">
+    <!-- Mobile/Tablet Top Header Bar -->
+    <header class="lg:hidden flex items-center justify-between px-4 py-3 bg-white/90 backdrop-blur-md border-b border-slate-200 sticky top-0 z-20">
       <div class="flex items-center space-x-3">
-        <!-- Hamburger Button -->
-        <button @click="mobileMenuOpen = true" class="p-1.5 rounded-lg text-slate-300 hover:text-white bg-slate-900 border border-slate-800">
+        <button @click="mobileMenuOpen = true" aria-label="Open menu"
+                class="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 bg-slate-100 border border-slate-200 transition">
           <i data-lucide="menu" class="w-5 h-5"></i>
         </button>
-        <span class="font-bold text-sm text-white">DocuVault AI</span>
+        <a href="{% url 'dashboard' %}" class="font-bold text-sm text-slate-900">DocuVault AI</a>
       </div>
       <div class="flex items-center space-x-2">
-        <a href="{% url 'upload' %}" class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-semibold flex items-center space-x-1">
+        {% if review_queue_count or failed_count %}
+          <a href="{% url 'review_queue' %}" class="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
+            Review ({{ review_queue_count|default:0|add:failed_count|default:0 }})
+          </a>
+        {% endif %}
+        <a href="{% url 'upload' %}" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-1 shadow-sm transition">
           <i data-lucide="upload-cloud" class="w-3.5 h-3.5"></i>
           <span>Upload</span>
         </a>
@@ -205,13 +278,16 @@
     </header>
 
     <!-- Main Viewport Body -->
-    <main class="flex-1 px-3 sm:px-6 md:px-8 py-5 sm:py-8 max-w-7xl w-full mx-auto">
+    <main class="flex-1 px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-7xl w-full mx-auto">
       {% if messages %}
-        <div class="mb-5 space-y-2">
+        <div class="mb-5 space-y-2 animate-fade-up">
           {% for message in messages %}
-            <div class="text-xs font-semibold px-3.5 py-2.5 rounded-xl border flex items-center justify-between {% if message.tags == 'error' %}bg-rose-950/60 border-rose-800 text-rose-200{% elif message.tags == 'success' %}bg-emerald-950/60 border-emerald-800 text-emerald-200{% else %}bg-indigo-950/60 border-indigo-800 text-indigo-200{% endif %}">
+            <div class="text-xs font-semibold px-4 py-3 rounded-xl border flex items-center justify-between shadow-sm
+              {% if message.tags == 'error' %}bg-rose-50 border-rose-200 text-rose-800
+              {% elif message.tags == 'success' %}bg-emerald-50 border-emerald-200 text-emerald-800
+              {% else %}bg-indigo-50 border-indigo-200 text-indigo-800{% endif %}">
               <span>{{ message }}</span>
-              <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white ml-2">&times;</button>
+              <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-slate-700 ml-3 text-base leading-none">&times;</button>
             </div>
           {% endfor %}
         </div>
@@ -222,7 +298,7 @@
   </div>
 
   <div id="toast-host" class="fixed bottom-4 right-4 left-4 sm:left-auto z-50 flex flex-col space-y-2 pointer-events-none sm:w-80"></div>
-  <div id="modal-container" class="fixed inset-0 z-50 hidden items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md"></div>
+  <div id="modal-container" class="fixed inset-0 z-50 hidden items-center justify-center p-3 sm:p-4 bg-slate-900/40 backdrop-blur-sm"></div>
 
   <script src="{% static 'vault/js/app.js' %}"></script>
   <script>

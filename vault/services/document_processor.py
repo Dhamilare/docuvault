@@ -1,360 +1,333 @@
-import json
 import logging
-import math
-import os
 import time
-from typing import Tuple, Dict, Any
-import msal
-import requests
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Tuple
+
 from django.conf import settings
+from django.db import close_old_connections
+from django.db.models import F
 from django.utils import timezone
+
 from vault.models import Document, DocumentCategory, ProcessingLog, SystemConfiguration
+from vault.services import gemini_classifier, sharepoint
 
 logger = logging.getLogger("vault")
 
-# ==============================================================================
-# 1. Microsoft Graph Token & Filing Services
-# ==============================================================================
-
-def get_graph_app_token() -> str:
-    """Acquires application-only token via Client Credentials for SharePoint filing."""
-    if not (settings.MS_CLIENT_ID and settings.MS_CLIENT_SECRET and settings.MS_TENANT_ID):
-        raise ValueError("Microsoft Entra ID client credentials not configured in settings/.env.")
-
-    app = msal.ConfidentialClientApplication(
-        client_id=settings.MS_CLIENT_ID,
-        client_credential=settings.MS_CLIENT_SECRET,
-        authority=settings.MS_AUTHORITY,
-    )
-    result = app.acquire_token_for_client(scopes=settings.GRAPH_SCOPES)
-    if "access_token" in result:
-        return result["access_token"]
-
-    err = result.get("error_description") or result.get("error") or "Unknown MSAL token error"
-    raise PermissionError(f"Failed to acquire Microsoft Graph app token: {err}")
+_executor = ThreadPoolExecutor(max_workers=getattr(settings, "VAULT_WORKER_THREADS", 4))
 
 
-def sync_sharepoint_metadata(site_id: str, drive_id: str, item_id: str, token: str, document: Document) -> Dict[str, Any]:
-    """
-    Enterprise ECM Integration:
-    Updates SharePoint Custom Metadata Columns on the document's backing List Item.
-    Dynamically identifies existing columns in the library so it never fails if a column is missing.
-    """
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    fields_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/{item_id}/listItem/fields"
-
+def _run_in_worker(document_pk: int) -> None:
+    """Wrapper ensuring DB connections are cleanly closed after background thread execution."""
     try:
-        # 1. Query available columns on this list item
-        get_resp = requests.get(fields_url, headers=headers, timeout=15)
-        if get_resp.status_code != 200:
-            logger.warning("Could not fetch SharePoint item fields [%s]: %s", get_resp.status_code, get_resp.text)
-            return {}
-
-        available_fields = get_resp.json()
-
-        # 2. Candidate mapping (Target SharePoint column name -> Document value)
-        candidate_fields = {
-            "Title": document.original_filename,
-            "CompanyName": document.company_name or "",
-            "Company": document.company_name or "",
-            "DocumentCategory": document.category.name if document.category else "",
-            "Category": document.category.name if document.category else "",
-            "DocumentYear": str(document.document_year) if document.document_year else "",
-            "Year": str(document.document_year) if document.document_year else "",
-            "DocumentDate": document.document_date.strftime("%Y-%m-%d") if document.document_date else None,
-            "ConfidenceScore": f"{document.confidence_percent}%" if document.confidence_percent else "",
-            "AISummary": document.ai_summary or "",
-        }
-
-        # Include extracted entities (e.g. invoice_number, total_amount)
-        if isinstance(document.extracted_entities, dict):
-            for k, v in document.extracted_entities.items():
-                sanitized_key = "".join(x.title() for x in k.replace("-", "_").split("_"))
-                candidate_fields[sanitized_key] = str(v)
-
-        # 3. Filter down to columns that actually exist in this SharePoint Library
-        patch_payload = {}
-        for col_name, col_value in candidate_fields.items():
-            if col_value is not None and col_name in available_fields:
-                patch_payload[col_name] = col_value
-
-        if not patch_payload:
-            return {}
-
-        # 4. Patch updated fields to SharePoint
-        patch_resp = requests.patch(fields_url, headers=headers, json=patch_payload, timeout=20)
-        if patch_resp.status_code in (200, 204):
-            return patch_payload
-        else:
-            logger.warning("SharePoint column update returned [%s]: %s", patch_resp.status_code, patch_resp.text)
-            return {}
-
-    except Exception as exc:
-        logger.error("Error syncing SharePoint metadata columns for doc %s: %s", document.pk, exc)
-        return {}
+        close_old_connections()
+        process_document(document_pk)
+    except Exception:
+        logger.exception("Unhandled exception in background worker for Document %s", document_pk)
+    finally:
+        close_old_connections()
 
 
-def upload_to_sharepoint(document: Document) -> Tuple[str, str, str, Dict[str, Any]]:
+def enqueue_document_processing(document_pk: int) -> str:
     """
-    Uploads document to SharePoint via Microsoft Graph API and updates metadata columns.
-    Returns (item_id, web_url, folder_path, synced_columns).
+    Dispatches document processing asynchronously.
+    Uses Celery if `CELERY_BROKER_URL` and `VAULT_USE_CELERY=True` are configured;
+    otherwise dispatches cleanly to the managed ThreadPoolExecutor.
     """
-    token = get_graph_app_token()
-    headers = {"Authorization": f"Bearer {token}"}
+    if getattr(settings, "VAULT_USE_CELERY", False):
+        try:
+            from celery import current_app
+            task = current_app.send_task("vault.tasks.process_document_task", args=[document_pk])
+            Document.objects.filter(pk=document_pk).update(task_id=task.id)
+            return task.id
+        except Exception as exc:
+            logger.warning("Celery dispatch failed (%s); falling back to local worker pool.", exc)
 
-    site_id = settings.GRAPH_SITE_ID.strip()
-    drive_id = settings.GRAPH_DRIVE_ID.strip()
-    root_folder = settings.GRAPH_LIBRARY_ROOT_FOLDER
-
-    if not site_id or not drive_id:
-        raise ValueError("GRAPH_SITE_ID or GRAPH_DRIVE_ID is missing in settings/.env.")
-
-    folder_path = document.clean_sharepoint_path(base_root=root_folder)
-    file_name = document.original_filename
-    file_path = document.temp_file.path
-    file_size = os.path.getsize(file_path)
-
-    encoded_item_path = f"{folder_path}/{file_name}".replace(" ", "%20")
-    base_drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}"
-
-    item_id = None
-    web_url = ""
-
-    # Direct PUT (<= 4MB)
-    if file_size <= 4 * 1024 * 1024:
-        put_url = f"{base_drive_url}/root:/{encoded_item_path}:/content"
-        with open(file_path, "rb") as f:
-            resp = requests.put(
-                put_url,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"},
-                data=f,
-                timeout=60,
-            )
-        if resp.status_code not in (200, 201):
-            raise RuntimeError(f"Graph PUT upload failed [{resp.status_code}]: {resp.text}")
-        data = resp.json()
-        item_id, web_url = data["id"], data.get("webUrl", "")
-
-    # Chunked UploadSession (> 4MB)
-    else:
-        session_url = f"{base_drive_url}/root:/{encoded_item_path}:/createUploadSession"
-        session_payload = {
-            "item": {
-                "@microsoft.graph.conflictBehavior": "rename",
-                "name": file_name,
-            }
-        }
-        s_resp = requests.post(session_url, headers=headers, json=session_payload, timeout=30)
-        if s_resp.status_code not in (200, 201):
-            raise RuntimeError(f"Failed to create Graph UploadSession [{s_resp.status_code}]: {s_resp.text}")
-
-        upload_url = s_resp.json()["uploadUrl"]
-        chunk_size = 320 * 1024 * 10  # 3.2 MB
-        final_data = None
-
-        with open(file_path, "rb") as f:
-            chunk_idx = 0
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                start_byte = chunk_idx * chunk_size
-                end_byte = start_byte + len(chunk) - 1
-                chunk_headers = {
-                    "Content-Length": str(len(chunk)),
-                    "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
-                }
-                c_resp = requests.put(upload_url, headers=chunk_headers, data=chunk, timeout=90)
-                if c_resp.status_code not in (200, 201, 202):
-                    raise RuntimeError(f"Chunk upload failed [{c_resp.status_code}]: {c_resp.text}")
-                if c_resp.status_code in (200, 201):
-                    final_data = c_resp.json()
-                chunk_idx += 1
-
-        if not final_data:
-            raise RuntimeError("Upload session completed without returning final item payload.")
-
-        item_id, web_url = final_data["id"], final_data.get("webUrl", "")
-
-    # ECM Step: Sync SharePoint Custom Metadata Columns
-    synced_cols = sync_sharepoint_metadata(site_id, drive_id, item_id, token, document)
-
-    return item_id, web_url, folder_path, synced_cols
+    _executor.submit(_run_in_worker, document_pk)
+    return "threadpool"
 
 
 def file_reviewed_document(document: Document, actor=None) -> Tuple[bool, str]:
     """
-    Transfers the verified document to SharePoint, syncs metadata columns, and records logs.
+    Uploads the document to SharePoint, syncs ECM list-item columns, updates
+    telemetry, and purges the transient file if configured.
     Returns (success: bool, error_message: str).
     """
     if not document.has_temp_file:
-        msg = "Local scan file missing from disk."
+        msg = "Transient scan file is missing from storage."
         document.mark(Document.Status.FAILED, error_message=msg)
+        document.log_step(ProcessingLog.Step.FAILED, msg, actor=actor)
         return False, msg
 
-    document.log_step(ProcessingLog.Step.FILING, "Filing document and syncing ECM metadata to SharePoint...", actor=actor)
+    config = SystemConfiguration.get_settings()
+    folder_path = document.clean_sharepoint_path(
+        base_root=config.sharepoint_root_folder,
+        template=config.folder_template,
+    )
+    target_filename = document.get_sanitized_filename()
+
+    document.log_step(
+        ProcessingLog.Step.FILING,
+        f"Uploading '{target_filename}' to SharePoint folder '{folder_path}'...",
+        actor=actor,
+    )
     start_time = time.time()
 
     try:
-        item_id, web_url, folder_path, synced_cols = upload_to_sharepoint(document)
+        upload_result = sharepoint.upload_document(
+            document=document,
+            folder_path=folder_path,
+            filename=target_filename,
+            conflict_behavior=config.sharepoint_conflict_behavior,
+        )
+
+        # Update SharePoint upload fields immediately before metadata step
+        document.sharepoint_site_id = upload_result["site_id"]
+        document.sharepoint_drive_id = upload_result["drive_id"]
+        document.sharepoint_item_id = upload_result["item_id"]
+        document.sharepoint_etag = upload_result.get("etag", "")
+        document.sharepoint_web_url = upload_result.get("web_url", "")
+        document.sharepoint_folder_path = upload_result["folder_path"]
+        document.filed_filename = upload_result.get("name", target_filename)
+        document.sharepoint_uploaded_at = timezone.now()
+
+        # Sync SharePoint ECM metadata columns
+        synced_cols = {}
+        meta_err = ""
+        if config.sync_sharepoint_columns:
+            synced_cols, list_item_id, meta_ok, meta_err = sharepoint.sync_item_metadata(
+                site_id=upload_result["site_id"],
+                drive_id=upload_result["drive_id"],
+                item_id=upload_result["item_id"],
+                document=document,
+            )
+            document.sharepoint_list_item_id = list_item_id
+            document.sharepoint_metadata_payload = synced_cols
+            document.sharepoint_metadata_status = (
+                Document.MetadataSyncStatus.SYNCED if meta_ok else Document.MetadataSyncStatus.FAILED
+            )
+        else:
+            document.sharepoint_metadata_status = Document.MetadataSyncStatus.NOT_APPLICABLE
+
         duration_ms = int((time.time() - start_time) * 1000)
 
-        document.sharepoint_item_id = item_id
-        document.sharepoint_web_url = web_url
-        document.sharepoint_folder_path = folder_path
-        document.sharepoint_uploaded_at = timezone.now()
-        document.status = Document.Status.FILED
-        document.error_message = ""
-        document.save()
+        document.mark(
+            Document.Status.FILED,
+            sharepoint_site_id=document.sharepoint_site_id,
+            sharepoint_drive_id=document.sharepoint_drive_id,
+            sharepoint_item_id=document.sharepoint_item_id,
+            sharepoint_list_item_id=document.sharepoint_list_item_id,
+            sharepoint_etag=document.sharepoint_etag,
+            sharepoint_web_url=document.sharepoint_web_url,
+            sharepoint_folder_path=document.sharepoint_folder_path,
+            filed_filename=document.filed_filename,
+            sharepoint_uploaded_at=document.sharepoint_uploaded_at,
+            sharepoint_metadata_status=document.sharepoint_metadata_status,
+            sharepoint_metadata_payload=document.sharepoint_metadata_payload,
+            error_message="",
+        )
 
-        msg = f"Successfully filed to SharePoint: '{folder_path}'"
+        msg = f"Filed to SharePoint: '{document.sharepoint_folder_path}/{document.filed_filename}'"
         if synced_cols:
-            msg += f" with {len(synced_cols)} ECM columns synced."
+            msg += f" ({len(synced_cols)} ECM columns synced)"
 
         document.log_step(
             ProcessingLog.Step.FILED,
             msg,
             actor=actor,
             duration_ms=duration_ms,
-            metadata={"web_url": web_url, "item_id": item_id, "columns": synced_cols},
+            metadata={
+                "web_url": document.sharepoint_web_url,
+                "item_id": document.sharepoint_item_id,
+                "columns": synced_cols,
+            },
         )
 
-        config = SystemConfiguration.get_settings()
+        if config.sync_sharepoint_columns and document.sharepoint_metadata_status == Document.MetadataSyncStatus.FAILED:
+            document.log_step(
+                ProcessingLog.Step.METADATA_FAILED,
+                f"File uploaded, but SharePoint column sync failed: {meta_err}",
+                actor=actor,
+            )
+
         if config.delete_local_on_file:
-            document.purge_temp_file()
+            if document.purge_temp_file():
+                document.log_step(ProcessingLog.Step.PURGED, "Transient scan file purged after verified filing.", actor=actor)
 
         return True, ""
 
     except Exception as exc:
         duration_ms = int((time.time() - start_time) * 1000)
         err_msg = str(exc)
-        logger.exception("Failed to file document %s to SharePoint: %s", document.pk, err_msg)
-        document.status = Document.Status.FAILED
-        document.error_message = err_msg
-        document.save()
-
+        logger.exception("Failed to file Document %s to SharePoint: %s", document.pk, err_msg)
+        document.mark(Document.Status.FAILED, error_message=err_msg)
         document.log_step(
             ProcessingLog.Step.FAILED,
-            f"SharePoint upload failed: {err_msg}",
+            f"SharePoint filing failed: {err_msg}",
             actor=actor,
             duration_ms=duration_ms,
         )
         return False, err_msg
 
 
-# ==============================================================================
-# 2. Gemini Classification with Exponential Backoff
-# ==============================================================================
+def retry_metadata_sync(document: Document, actor=None) -> Tuple[bool, str]:
+    """Retries syncing SharePoint ECM columns for an already-filed document."""
+    if document.status != Document.Status.FILED or not document.sharepoint_item_id:
+        return False, "Document has not been filed to SharePoint yet."
 
-def _call_gemini_with_retry(document: Document) -> dict:
-    api_key = settings.GEMINI_API_KEY
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY is not configured.")
+    site_id = document.sharepoint_site_id or getattr(settings, "GRAPH_SITE_ID", "").strip()
+    drive_id = document.sharepoint_drive_id or getattr(settings, "GRAPH_DRIVE_ID", "").strip()
+    if not site_id or not drive_id:
+        return False, "Missing SharePoint site_id or drive_id."
 
-    model_name = settings.GEMINI_MODEL or "gemini-2.5-flash"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-
-    prompt = (
-        "Analyze this scanned document. Extract and return JSON with keys:\n"
-        "- company_name: string (originating vendor or organization)\n"
-        "- document_year: integer\n"
-        "- document_date: string (YYYY-MM-DD format if found, otherwise null)\n"
-        "- category: string (e.g. Invoice, Tax Return, Legal Agreement, Bank Statement)\n"
-        "- summary: string (2-3 sentence overview)\n"
-        "- confidence: float between 0.0 and 1.0\n"
-        "- entities: key-value dictionary of pertinent fields (invoice_number, total_amount, etc.)"
+    synced_cols, list_item_id, ok, err = sharepoint.sync_item_metadata(
+        site_id=site_id,
+        drive_id=drive_id,
+        item_id=document.sharepoint_item_id,
+        document=document,
+    )
+    document.sharepoint_list_item_id = list_item_id or document.sharepoint_list_item_id
+    document.sharepoint_metadata_payload = synced_cols
+    document.sharepoint_metadata_status = (
+        Document.MetadataSyncStatus.SYNCED if ok else Document.MetadataSyncStatus.FAILED
+    )
+    document.save(
+        update_fields=[
+            "sharepoint_list_item_id",
+            "sharepoint_metadata_payload",
+            "sharepoint_metadata_status",
+            "updated_at",
+        ]
     )
 
-    payload = {
-        "contents": [{"parts": [{"text": f"Document original filename: {document.original_filename}\n{prompt}"}]}],
-        "generationConfig": {"responseMimeType": "application/json"},
-    }
+    if ok:
+        document.log_step(
+            ProcessingLog.Step.METADATA_SYNCED,
+            f"Synced {len(synced_cols)} SharePoint ECM columns.",
+            actor=actor,
+            metadata={"columns": synced_cols},
+        )
+        return True, ""
 
-    max_retries = getattr(settings, "GEMINI_MAX_RETRIES", 3)
-    last_error = None
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            resp = requests.post(url, json=payload, timeout=45)
-            if resp.status_code == 200:
-                res_json = resp.json()
-                content_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                return json.loads(content_text)
-
-            if resp.status_code in (503, 429):
-                sleep_sec = math.pow(2, attempt)
-                time.sleep(sleep_sec)
-                last_error = f"Gemini {resp.status_code}: {resp.text}"
-                continue
-
-            raise RuntimeError(f"Gemini API returned error {resp.status_code}: {resp.text}")
-
-        except (requests.RequestException, json.JSONDecodeError) as exc:
-            last_error = str(exc)
-            time.sleep(2)
-
-    raise RuntimeError(f"Gemini API unavailable after {max_retries} retries: {last_error}")
+    document.log_step(ProcessingLog.Step.METADATA_FAILED, err, actor=actor)
+    return False, err
 
 
-def process_document(document_pk: int):
-    try:
-        doc = Document.objects.get(pk=document_pk)
-    except Document.DoesNotExist:
+def process_document(document_pk: int, force: bool = False) -> None:
+    """
+    Claims a document atomically, reads its content via Gemini, creates/resolves its
+    category, and either auto-files to SharePoint or routes to Needs Review.
+    """
+    claimable_statuses = [
+        Document.Status.PENDING,
+        Document.Status.NEEDS_REVIEW,
+        Document.Status.FAILED,
+    ]
+    if force:
+        claimable_statuses.append(Document.Status.PROCESSING)
+
+    claimed = Document.objects.filter(
+        pk=document_pk,
+        status__in=claimable_statuses,
+    ).update(
+        status=Document.Status.PROCESSING,
+        locked_at=timezone.now(),
+        attempt_count=F("attempt_count") + 1,
+        error_message="",
+        updated_at=timezone.now(),
+    )
+    if not claimed:
+        logger.info("Document %s could not be claimed (already processing or filed).", document_pk)
         return
 
-    doc.status = Document.Status.PROCESSING
-    doc.save(update_fields=["status"])
-    doc.log_step(ProcessingLog.Step.CLASSIFYING, "Submitting document to Gemini AI...")
+    doc = Document.objects.get(pk=document_pk)
+    if not doc.has_temp_file:
+        msg = "Transient scan file missing from storage; cannot classify."
+        doc.mark(Document.Status.FAILED, error_message=msg, locked_at=None)
+        doc.log_step(ProcessingLog.Step.FAILED, msg)
+        return
+
+    config = SystemConfiguration.get_settings()
+    doc.log_step(
+        ProcessingLog.Step.CLASSIFYING,
+        f"Reading document content via {config.gemini_model} (attempt #{doc.attempt_count})...",
+    )
 
     start_time = time.time()
     try:
-        ai_data = _call_gemini_with_retry(doc)
+        result = gemini_classifier.classify_document(
+            file_source=doc.temp_file,
+            filename=doc.original_filename,
+            model_name=config.gemini_model,
+            max_retries=config.max_retry_attempts,
+        )
         duration_ms = int((time.time() - start_time) * 1000)
 
-        doc.company_name = ai_data.get("company_name") or ""
-        doc.document_year = ai_data.get("document_year")
-        doc.ai_summary = ai_data.get("summary") or ""
-        doc.confidence_score = float(ai_data.get("confidence") or 0.8)
-        doc.extracted_entities = ai_data.get("entities") or {}
-        doc.ai_raw_response = ai_data
+        category = DocumentCategory.get_or_create_discovered(
+            raw_name=result["document_type"],
+            description=result["category_description"],
+        )
 
-        cat_name = ai_data.get("category") or "Uncategorized"
-        doc.category = DocumentCategory.get_or_create_discovered(cat_name)
-        doc.processed_at = timezone.now()
+        # Preserve operator edits if manually corrected prior to re-run
+        company_name = doc.company_name if (doc.is_manually_edited and doc.company_name) else result["company_name"]
 
-        config = SystemConfiguration.get_settings()
+        doc.mark(
+            Document.Status.PROCESSING,
+            category=category,
+            company_name=company_name,
+            document_title=result["document_title"],
+            document_date=result["document_date"],
+            document_year=result["document_year"],
+            document_language=result["document_language"],
+            ai_summary=result["summary"],
+            extracted_text_excerpt=result["extracted_text"],
+            confidence_score=result["confidence"],
+            extracted_entities=result["key_entities"],
+            ai_raw_response=result["raw_response"],
+            page_count=result["page_count"],
+            ai_model_used=result["model_used"],
+            ai_input_tokens=result["input_tokens"],
+            ai_output_tokens=result["output_tokens"],
+            processed_at=timezone.now(),
+            locked_at=None,
+        )
+        category.update_document_count()
 
         if doc.confidence_score >= config.auto_file_threshold:
-            doc.status = Document.Status.PROCESSING
-            doc.save()
             doc.log_step(
                 ProcessingLog.Step.CLASSIFIED,
-                f"Classified as '{cat_name}' with confidence {doc.confidence_percent}%. Auto-filing...",
+                f"Classified as '{category.name}' ({doc.confidence_percent}% >= {int(config.auto_file_threshold * 100)}%). Auto-filing to SharePoint...",
                 duration_ms=duration_ms,
+                metadata={
+                    "model": doc.ai_model_used,
+                    "input_tokens": doc.ai_input_tokens,
+                    "output_tokens": doc.ai_output_tokens,
+                },
             )
             file_reviewed_document(doc)
         else:
-            doc.status = Document.Status.NEEDS_REVIEW
-            doc.save()
+            doc.mark(Document.Status.NEEDS_REVIEW)
             doc.log_step(
                 ProcessingLog.Step.CLASSIFIED,
-                f"Classified as '{cat_name}', confidence {doc.confidence_percent}% below auto-file threshold. Sent to Review Queue.",
+                f"Classified as '{category.name}' ({doc.confidence_percent}% below {int(config.auto_file_threshold * 100)}% threshold). Routed to Review Queue.",
                 duration_ms=duration_ms,
+                metadata={
+                    "model": doc.ai_model_used,
+                    "input_tokens": doc.ai_input_tokens,
+                    "output_tokens": doc.ai_output_tokens,
+                },
             )
 
     except Exception as exc:
         duration_ms = int((time.time() - start_time) * 1000)
-        logger.error("Gemini classification failed for document %s: %s", doc.pk, exc)
-        doc.status = Document.Status.NEEDS_REVIEW
-        doc.error_message = str(exc)
-        doc.ai_summary = "AI classification unavailable (high model demand). Ready for manual verification."
-        doc.save()
-
+        logger.error("Gemini classification failed for Document %s: %s", doc.pk, exc, exc_info=True)
+        doc.mark(
+            Document.Status.NEEDS_REVIEW,
+            error_message=str(exc),
+            ai_summary=doc.ai_summary or "AI classification failed. Ready for manual review.",
+            locked_at=None,
+        )
         doc.log_step(
             ProcessingLog.Step.FAILED,
-            f"AI classification failed: {exc}. Retaining scan for manual filing.",
+            f"AI classification error: {exc}. Local scan retained for manual verification.",
             duration_ms=duration_ms,
         )

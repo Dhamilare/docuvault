@@ -1,9 +1,19 @@
 import json
 from django.contrib import admin, messages
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe
 from .models import Document, DocumentCategory, ProcessingLog, SystemConfiguration
 from .services import document_processor
+
+BADGE_PALETTE = {
+    "indigo": ("#4338ca", "#e0e7ff"),
+    "emerald": ("#047857", "#d1fae5"),
+    "sky": ("#0369a1", "#e0f2fe"),
+    "amber": ("#b45309", "#fef3c7"),
+    "purple": ("#6d28d9", "#ede9fe"),
+    "rose": ("#be123c", "#ffe4e6"),
+    "teal": ("#0f766e", "#ccfbf1"),
+    "slate": ("#334155", "#f1f5f9"),
+}
 
 
 class ProcessingLogInline(admin.TabularInline):
@@ -45,6 +55,7 @@ class DocumentAdmin(admin.ModelAdmin):
         "company_name",
         "document_year",
         "confidence_pill",
+        "metadata_sync_badge",
         "file_cache_status",
         "sharepoint_link",
         "uploaded_by",
@@ -52,33 +63,51 @@ class DocumentAdmin(admin.ModelAdmin):
     ]
     list_filter = [
         "status",
+        "sharepoint_metadata_status",
         "category",
         "document_year",
         "is_manually_edited",
         "created_at",
     ]
     search_fields = [
+        "uuid",
         "original_filename",
+        "filed_filename",
         "company_name",
+        "document_title",
         "checksum_sha256",
         "ai_summary",
-        "extracted_text_excerpt",
         "sharepoint_item_id",
     ]
     readonly_fields = [
+        "uuid",
         "original_filename",
         "file_size_formatted",
         "content_type",
         "checksum_sha256",
+        "page_count",
+        "duplicate_of",
+        "task_id",
+        "attempt_count",
+        "locked_at",
         "confidence_score",
+        "ai_model_used",
+        "ai_input_tokens",
+        "ai_output_tokens",
         "ai_summary",
         "extracted_text_excerpt",
         "extracted_entities_display",
         "ai_raw_response_display",
+        "sharepoint_site_id",
+        "sharepoint_drive_id",
         "sharepoint_folder_path",
         "sharepoint_item_id",
+        "sharepoint_list_item_id",
+        "sharepoint_etag",
         "sharepoint_link",
         "sharepoint_uploaded_at",
+        "sharepoint_metadata_status",
+        "sharepoint_metadata_payload_display",
         "error_message_display",
         "is_manually_edited",
         "reviewed_by",
@@ -90,6 +119,7 @@ class DocumentAdmin(admin.ModelAdmin):
     inlines = [ProcessingLogInline]
     actions = [
         "action_file_to_sharepoint",
+        "action_retry_metadata_sync",
         "action_reprocess_documents",
         "action_discard_documents",
     ]
@@ -97,11 +127,15 @@ class DocumentAdmin(admin.ModelAdmin):
     fieldsets = (
         ("File & Staging Storage", {
             "fields": (
+                "uuid",
                 "original_filename",
+                "filed_filename",
                 "temp_file",
                 "file_size_formatted",
+                "page_count",
                 "content_type",
                 "checksum_sha256",
+                "duplicate_of",
                 "uploaded_by",
             )
         }),
@@ -110,8 +144,10 @@ class DocumentAdmin(admin.ModelAdmin):
                 "status",
                 "category",
                 "company_name",
+                "document_title",
                 "document_date",
                 "document_year",
+                "document_language",
                 "confidence_score",
                 "ai_summary",
                 "extracted_entities_display",
@@ -119,15 +155,32 @@ class DocumentAdmin(admin.ModelAdmin):
                 "ai_raw_response_display",
             )
         }),
+        ("AI Telemetry & Worker State", {
+            "fields": (
+                "ai_model_used",
+                "ai_input_tokens",
+                "ai_output_tokens",
+                "task_id",
+                "attempt_count",
+                "locked_at",
+            ),
+            "classes": ("collapse",),
+        }),
         ("Operator Verification", {
             "fields": ("is_manually_edited", "reviewed_by", "reviewed_at")
         }),
-        ("SharePoint Filing Destination (ECM)", {
+        ("SharePoint Filing & Column Sync (ECM)", {
             "fields": (
                 "sharepoint_folder_path",
+                "sharepoint_site_id",
+                "sharepoint_drive_id",
                 "sharepoint_item_id",
+                "sharepoint_list_item_id",
+                "sharepoint_etag",
                 "sharepoint_link",
                 "sharepoint_uploaded_at",
+                "sharepoint_metadata_status",
+                "sharepoint_metadata_payload_display",
                 "error_message_display",
             )
         }),
@@ -137,7 +190,10 @@ class DocumentAdmin(admin.ModelAdmin):
         }),
     )
 
-    # --- Visual Column Badges ---
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            "category", "uploaded_by", "reviewed_by", "duplicate_of"
+        )
 
     @admin.display(description="Status")
     def status_badge(self, obj):
@@ -152,33 +208,48 @@ class DocumentAdmin(admin.ModelAdmin):
         return format_html(
             '<span style="background:{}; color:{}; padding:3px 9px; border-radius:9999px; '
             'font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:0.025em;">{}</span>',
-            bg,
-            fg,
-            obj.get_status_display(),
+            bg, fg, obj.get_status_display(),
         )
 
     @admin.display(description="Category")
     def category_badge(self, obj):
         if not obj.category:
             return format_html('<span style="color:#94a3b8; font-style:italic;">Uncategorized</span>')
+        fg, bg = BADGE_PALETTE.get(obj.category.color, ("#5b21b6", "#ede9fe"))
         return format_html(
-            '<span style="background:#ede9fe; color:#5b21b6; padding:2px 8px; border-radius:6px; font-weight:600; font-size:11px;">{}</span>',
-            obj.category.name,
+            '<span style="background:{}; color:{}; padding:2px 8px; border-radius:6px; font-weight:600; font-size:11px;">{}</span>',
+            bg, fg, obj.category.name,
         )
 
     @admin.display(description="Confidence")
     def confidence_pill(self, obj):
         if obj.confidence_score is None:
             return "—"
-        pct = int(obj.confidence_score * 100)
+        pct = obj.confidence_percent
         color = "#059669" if pct >= 80 else ("#d97706" if pct >= 60 else "#dc2626")
         return format_html('<strong style="color:{}; font-size:12px;">{}%</strong>', color, pct)
+
+    @admin.display(description="ECM Sync")
+    def metadata_sync_badge(self, obj):
+        colors = {
+            Document.MetadataSyncStatus.SYNCED: "#059669",
+            Document.MetadataSyncStatus.FAILED: "#dc2626",
+            Document.MetadataSyncStatus.PENDING: "#d97706",
+            Document.MetadataSyncStatus.NOT_APPLICABLE: "#94a3b8",
+        }
+        color = colors.get(obj.sharepoint_metadata_status, "#94a3b8")
+        return format_html(
+            '<span style="color:{}; font-size:11px; font-weight:600;">{}</span>',
+            color, obj.get_sharepoint_metadata_status_display(),
+        )
 
     @admin.display(description="Local Scan")
     def file_cache_status(self, obj):
         if obj.has_temp_file:
             return format_html('<span style="color:#059669; font-weight:600;">&#x2714; Cached</span>')
-        return format_html('<span style="color:#94a3b8; font-size:11px;">Purged (Filed)</span>')
+        if obj.status == Document.Status.FILED:
+            return format_html('<span style="color:#94a3b8; font-size:11px;">Purged (Filed)</span>')
+        return format_html('<span style="color:#dc2626; font-size:11px;">Missing</span>')
 
     @admin.display(description="SharePoint Link")
     def sharepoint_link(self, obj):
@@ -203,78 +274,84 @@ class DocumentAdmin(admin.ModelAdmin):
             obj.error_message,
         )
 
-    @admin.display(description="Extracted Entities")
-    def extracted_entities_display(self, obj):
-        if not obj.extracted_entities:
-            return "None discovered"
+    def _pretty_json(self, data, empty_label="—", text_color="#94a3b8"):
+        if not data:
+            return empty_label
         try:
-            formatted = json.dumps(obj.extracted_entities, indent=2)
+            formatted = json.dumps(data, indent=2)
             return format_html(
-                '<pre style="background:#0f172a; color:#38bdf8; padding:8px 12px; border-radius:6px; font-size:12px; max-height:220px; overflow:auto;">{}</pre>',
-                formatted,
+                '<pre style="background:#0f172a; color:{}; padding:8px 12px; border-radius:6px; font-size:11px; max-height:220px; overflow:auto;">{}</pre>',
+                text_color, formatted,
             )
         except Exception:
-            return str(obj.extracted_entities)
+            return str(data)
+
+    @admin.display(description="Extracted Entities")
+    def extracted_entities_display(self, obj):
+        return self._pretty_json(obj.extracted_entities, "None discovered", "#38bdf8")
 
     @admin.display(description="AI Raw Payload")
     def ai_raw_response_display(self, obj):
-        if not obj.ai_raw_response:
-            return "—"
-        try:
-            formatted = json.dumps(obj.ai_raw_response, indent=2)
-            return format_html(
-                '<pre style="background:#0f172a; color:#94a3b8; padding:8px 12px; border-radius:6px; font-size:11px; max-height:200px; overflow:auto;">{}</pre>',
-                formatted,
-            )
-        except Exception:
-            return str(obj.ai_raw_response)
+        return self._pretty_json(obj.ai_raw_response)
+
+    @admin.display(description="Synced SharePoint Columns")
+    def sharepoint_metadata_payload_display(self, obj):
+        return self._pretty_json(obj.sharepoint_metadata_payload, "None", "#34d399")
 
     # --- Batch Actions ---
 
-    @admin.action(description="File selected documents to SharePoint (Sync ECM Columns)")
+    @admin.action(description="File selected documents to SharePoint (max 25)")
     def action_file_to_sharepoint(self, request, queryset):
         success_count = 0
         fail_count = 0
-
-        for doc in queryset:
+        for doc in queryset[:25]:
             if not doc.has_temp_file:
                 fail_count += 1
                 continue
-
-            success, _ = document_processor.file_reviewed_document(doc, actor=request.user)
-            if success:
-                success_count += 1
-            else:
+            try:
+                ok, _ = document_processor.file_reviewed_document(doc, actor=request.user)
+                if ok:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception:
                 fail_count += 1
 
         if success_count:
             self.message_user(request, f"Successfully filed {success_count} document(s) to SharePoint.", level=messages.SUCCESS)
         if fail_count:
-            self.message_user(
-                request,
-                f"{fail_count} document(s) could not be filed (local scan missing or SharePoint error).",
-                level=messages.WARNING,
-            )
+            self.message_user(request, f"{fail_count} document(s) failed or lacked local scan files.", level=messages.WARNING)
 
-    @admin.action(description="Re-run Gemini AI processing on selected documents")
+    @admin.action(description="Retry SharePoint metadata column sync on filed docs")
+    def action_retry_metadata_sync(self, request, queryset):
+        ok_count = 0
+        fail_count = 0
+        for doc in queryset.filter(status=Document.Status.FILED)[:25]:
+            ok, _ = document_processor.retry_metadata_sync(doc, actor=request.user)
+            if ok:
+                ok_count += 1
+            else:
+                fail_count += 1
+        self.message_user(request, f"Metadata synced: {ok_count}, failed: {fail_count}.", level=messages.INFO)
+
+    @admin.action(description="Queue Gemini AI reprocessing for selected documents")
     def action_reprocess_documents(self, request, queryset):
         count = 0
-        for doc in queryset:
+        for doc in queryset.exclude(status=Document.Status.FILED)[:50]:
             if doc.has_temp_file:
-                document_processor.process_document(doc.pk)
+                doc.mark(Document.Status.PENDING, error_message="")
+                document_processor.enqueue_document_processing(doc.pk)
                 count += 1
-        self.message_user(request, f"Triggered Gemini reprocessing for {count} document(s).", level=messages.INFO)
+        self.message_user(request, f"Queued Gemini reprocessing for {count} document(s).", level=messages.INFO)
 
-    @admin.action(description="Discard selected documents (Purge local files)")
+    @admin.action(description="Discard unfiled documents (Purge transient files)")
     def action_discard_documents(self, request, queryset):
         count = 0
-        for doc in queryset:
-            if doc.status == Document.Status.FILED:
-                continue
+        for doc in queryset.exclude(status=Document.Status.FILED):
             doc.purge_temp_file(force=True)
             doc.delete()
             count += 1
-        self.message_user(request, f"Permanently discarded {count} document(s) and cleared local staging.", level=messages.SUCCESS)
+        self.message_user(request, f"Permanently discarded {count} unfiled document(s).", level=messages.SUCCESS)
 
 
 @admin.register(DocumentCategory)
@@ -290,26 +367,16 @@ class DocumentCategoryAdmin(admin.ModelAdmin):
     ]
     search_fields = ["name", "canonical_name", "description"]
     list_filter = ["is_hidden", "color"]
+    readonly_fields = ["canonical_name", "first_seen_at", "document_count"]
     prepopulated_fields = {"slug": ("name",)}
     actions = ["action_recalculate_counts"]
 
     @admin.display(description="Badge Color")
     def color_badge(self, obj):
-        colors = {
-            "indigo": "#6366f1",
-            "emerald": "#10b981",
-            "sky": "#0ea5e9",
-            "amber": "#f59e0b",
-            "purple": "#a855f7",
-            "rose": "#f43f5e",
-            "teal": "#14b8a6",
-            "slate": "#64748b",
-        }
-        hex_code = colors.get(obj.color, "#6366f1")
+        fg, bg = BADGE_PALETTE.get(obj.color, ("#4338ca", "#e0e7ff"))
         return format_html(
-            '<span style="background:{}; color:#fff; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600;">{}</span>',
-            hex_code,
-            obj.get_color_display(),
+            '<span style="background:{}; color:{}; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600;">{}</span>',
+            bg, fg, obj.get_color_display(),
         )
 
     @admin.action(description="Recalculate associated document counts")
@@ -327,19 +394,29 @@ class ProcessingLogAdmin(admin.ModelAdmin):
     readonly_fields = ["document", "step", "message", "duration_ms", "metadata_display", "actor", "created_at"]
     ordering = ["-created_at"]
 
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
     @admin.display(description="Step")
     def step_badge(self, obj):
         colors = {
             ProcessingLog.Step.FILED: "#059669",
+            ProcessingLog.Step.METADATA_SYNCED: "#059669",
             ProcessingLog.Step.FAILED: "#dc2626",
+            ProcessingLog.Step.METADATA_FAILED: "#d97706",
             ProcessingLog.Step.CLASSIFYING: "#0284c7",
             ProcessingLog.Step.CLASSIFIED: "#4338ca",
         }
         color = colors.get(obj.step, "#475569")
         return format_html(
             '<span style="color:{}; font-weight:700; text-transform:uppercase; font-size:11px;">{}</span>',
-            color,
-            obj.get_step_display(),
+            color, obj.get_step_display(),
         )
 
     @admin.display(description="Latency")
@@ -361,24 +438,44 @@ class SystemConfigurationAdmin(admin.ModelAdmin):
     list_display = [
         "gemini_model",
         "auto_file_threshold_percent",
+        "sharepoint_root_folder",
         "folder_template",
+        "sharepoint_conflict_behavior",
+        "sync_sharepoint_columns",
         "delete_local_on_file",
+        "updated_at",
     ]
-    fields = [
-        "gemini_model",
-        "auto_file_threshold",
-        "folder_template",
-        "delete_local_on_file",
-    ]
+    readonly_fields = ["updated_at", "updated_by"]
+    fieldsets = (
+        ("AI Classification Settings", {
+            "fields": ("gemini_model", "auto_file_threshold", "max_retry_attempts"),
+        }),
+        ("SharePoint Filing & ECM Metadata", {
+            "fields": (
+                "sharepoint_root_folder",
+                "folder_template",
+                "sharepoint_conflict_behavior",
+                "sync_sharepoint_columns",
+            ),
+        }),
+        ("Intake & Storage Hygiene", {
+            "fields": ("max_file_size_mb", "delete_local_on_file"),
+        }),
+        ("Audit", {
+            "fields": ("updated_at", "updated_by"),
+        }),
+    )
 
     @admin.display(description="Auto-File Threshold")
     def auto_file_threshold_percent(self, obj):
         return f"{int(obj.auto_file_threshold * 100)}% Confidence"
 
+    def save_model(self, request, obj, form, change):
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
+
     def has_add_permission(self, request):
-        # Enforce singleton pattern: only one configuration row
         return not SystemConfiguration.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
-        # Prevent accidental deletion of system settings
         return False

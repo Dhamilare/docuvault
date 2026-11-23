@@ -4,28 +4,28 @@
 {% block title %}Discovered Categories — DocuVault AI{% endblock %}
 
 {% block content %}
-<div class="space-y-6 animate-in fade-in duration-300" x-data="{ mergeModalOpen: false }">
+<div class="space-y-6 animate-fade-up"
+     x-data="{ mergeModalOpen: {% if merge_form.errors or merge_form.non_field_errors %}true{% else %}false{% endif %} }">
 
   <!-- Header & Actions -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div>
-      <div class="flex items-center space-x-2.5">
-        <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Discovered Categories</h1>
-        <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+      <div class="flex flex-wrap items-center gap-2.5">
+        <h1 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Discovered Categories</h1>
+        <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
           Open-Ended AI Taxonomy
         </span>
       </div>
-      <p class="text-xs text-slate-400 mt-1 max-w-2xl">
-        Every document type Gemini identifies is tracked here automatically. Review discovered types, inspect document distribution, or merge near-duplicates.
+      <p class="text-xs sm:text-sm text-slate-500 mt-1.5 max-w-2xl">
+        Every document type Gemini identifies is cataloged automatically. Review discovered types, edit labels, or merge near-duplicates.
       </p>
     </div>
 
-    <!-- Merge Trigger Button -->
     <div class="shrink-0">
-      <button type="button" 
+      <button type="button"
               @click="mergeModalOpen = true"
-              class="w-full sm:w-auto inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-700 shadow-lg transition active:scale-95">
-        <i data-lucide="git-merge" class="w-4 h-4 text-indigo-400"></i>
+              class="w-full sm:w-auto inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold border border-slate-300 shadow-sm hover:shadow transition active:scale-95">
+        <i data-lucide="git-merge" class="w-4 h-4 text-indigo-600"></i>
         <span>Merge Duplicates</span>
       </button>
     </div>
@@ -34,55 +34,62 @@
   <!-- Categories Grid -->
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
     {% for cat in categories %}
-      <div class="glass-card rounded-2xl p-5 border border-slate-800/80 hover:border-slate-700 transition flex flex-col justify-between space-y-4">
+      <div class="light-card rounded-2xl p-5 hover:-translate-y-0.5 hover:border-indigo-300 transition-all duration-200 flex flex-col justify-between space-y-4">
         <div>
           <div class="flex items-center justify-between gap-2">
-            <!-- Dynamic Tailwind Badge Color -->
+            <!-- Dynamic Light-Theme Badge Color -->
             <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border
-              {% if cat.color == 'emerald' %}bg-emerald-500/10 text-emerald-300 border-emerald-500/20
-              {% elif cat.color == 'amber' %}bg-amber-500/10 text-amber-300 border-amber-500/20
-              {% elif cat.color == 'rose' %}bg-rose-500/10 text-rose-300 border-rose-500/20
-              {% elif cat.color == 'sky' %}bg-sky-500/10 text-sky-300 border-sky-500/20
-              {% elif cat.color == 'purple' %}bg-purple-500/10 text-purple-300 border-purple-500/20
-              {% else %}bg-indigo-500/10 text-indigo-300 border-indigo-500/20{% endif %}">
-              <i data-lucide="tag" class="w-3 h-3 mr-1.5 opacity-70"></i>
+              {% if cat.color == 'emerald' %}bg-emerald-50 text-emerald-700 border-emerald-200
+              {% elif cat.color == 'amber' %}bg-amber-50 text-amber-700 border-amber-200
+              {% elif cat.color == 'rose' %}bg-rose-50 text-rose-700 border-rose-200
+              {% elif cat.color == 'sky' %}bg-sky-50 text-sky-700 border-sky-200
+              {% elif cat.color == 'purple' %}bg-purple-50 text-purple-700 border-purple-200
+              {% elif cat.color == 'teal' %}bg-teal-50 text-teal-700 border-teal-200
+              {% elif cat.color == 'slate' %}bg-slate-100 text-slate-700 border-slate-200
+              {% else %}bg-indigo-50 text-indigo-700 border-indigo-200{% endif %}">
+              <i data-lucide="tag" class="w-3 h-3 mr-1.5 opacity-75"></i>
               {{ cat.name }}
             </span>
 
-            <span class="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-900 text-slate-300 border border-slate-800">
-              {{ cat.doc_count }} {{ cat.doc_count|pluralize:"doc,docs" }}
-            </span>
+            <div class="flex items-center space-x-1.5">
+              {% if cat.is_hidden %}
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">Hidden</span>
+              {% endif %}
+              <span class="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                {{ cat.doc_count }} {{ cat.doc_count|pluralize:"doc,docs" }}
+              </span>
+            </div>
           </div>
 
           <!-- Description -->
-          <p class="text-xs text-slate-400 mt-3 line-clamp-2 leading-relaxed">
+          <p class="text-xs text-slate-600 mt-3 line-clamp-2 leading-relaxed">
             {{ cat.description|default:"Auto-discovered during cognitive intake. No manual description set." }}
           </p>
 
           {% if cat.merged_into %}
-            <div class="mt-2.5 text-[11px] text-amber-400/90 bg-amber-500/5 px-2.5 py-1 rounded-lg border border-amber-500/20">
+            <div class="mt-2.5 text-[11px] text-amber-800 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
               Merged into: <strong>{{ cat.merged_into.name }}</strong>
             </div>
           {% endif %}
         </div>
 
         <!-- Footer / Link -->
-        <div class="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
+        <div class="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
           <span>First seen {{ cat.first_seen_at|date:"M j, Y" }}</span>
-          <a href="{% url 'document_list' %}?category={{ cat.pk }}" 
-             class="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center space-x-1 transition">
+          <a href="{% url 'document_list' %}?category={{ cat.pk }}"
+             class="text-indigo-600 hover:text-indigo-700 font-semibold flex items-center space-x-1 transition">
             <span>View files</span>
             <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
           </a>
         </div>
       </div>
     {% empty %}
-      <div class="col-span-full text-center py-16 glass-card rounded-3xl border border-slate-800">
-        <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mx-auto mb-3">
+      <div class="col-span-full text-center py-16 light-card rounded-3xl">
+        <div class="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mx-auto mb-3">
           <i data-lucide="sparkles" class="w-6 h-6"></i>
         </div>
-        <h3 class="text-sm font-bold text-slate-200">No categories discovered yet</h3>
-        <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+        <h3 class="text-sm font-bold text-slate-800">No categories discovered yet</h3>
+        <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
           Upload document scans to allow Gemini AI to infer and catalog document types.
         </p>
       </div>
@@ -90,21 +97,26 @@
   </div>
 
   <!-- Merge Modal (Alpine.js powered) -->
-  <div x-show="mergeModalOpen" 
+  <div x-show="mergeModalOpen"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
        x-cloak
-       class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
-       style="display: none;">
-    <div class="glass-card rounded-2xl max-w-md w-full p-6 border border-slate-700 shadow-2xl relative text-left"
+       class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 backdrop-blur-sm">
+    <div class="modal-panel bg-white rounded-2xl max-w-md w-full p-6 border border-slate-200 shadow-2xl relative text-left"
          @click.away="mergeModalOpen = false">
-      
-      <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+
+      <div class="flex items-center justify-between pb-4 border-b border-slate-200">
         <div class="flex items-center space-x-2.5">
-          <div class="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+          <div class="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
             <i data-lucide="git-merge" class="w-4 h-4"></i>
           </div>
-          <h3 class="text-sm font-bold text-slate-100">Merge Categories</h3>
+          <h3 class="text-sm font-bold text-slate-900">Merge Categories</h3>
         </div>
-        <button type="button" @click="mergeModalOpen = false" class="text-slate-400 hover:text-white transition">
+        <button type="button" @click="mergeModalOpen = false" class="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition">
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
@@ -113,29 +125,35 @@
         {% csrf_token %}
         <input type="hidden" name="merge_action" value="1">
 
+        {% if merge_form.non_field_errors %}
+          <div class="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700">
+            {{ merge_form.non_field_errors|join:"; " }}
+          </div>
+        {% endif %}
+
         <div>
-          <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+          <label class="block text-xs font-semibold text-slate-700 mb-1.5">
             Source Category (Duplicate to absorb)
           </label>
           {{ merge_form.source_category }}
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+          <label class="block text-xs font-semibold text-slate-700 mb-1.5">
             Master Destination Category
           </label>
           {{ merge_form.target_category }}
         </div>
 
-        <div class="p-3 bg-amber-500/5 rounded-xl border border-amber-500/20 text-xs text-amber-300/90 leading-relaxed">
-          All documents under the source category will automatically migrate to the master category. The source will be retained as an alias.
+        <div class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800 leading-relaxed">
+          All documents under the source category will migrate to the master category. Future scans matching the old name will automatically resolve to the master category.
         </div>
 
-        <div class="flex items-center justify-end space-x-2.5 pt-3 border-t border-slate-800">
-          <button type="button" @click="mergeModalOpen = false" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white text-xs font-medium transition">
+        <div class="flex items-center justify-end space-x-2.5 pt-3 border-t border-slate-200">
+          <button type="button" @click="mergeModalOpen = false" class="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 text-xs font-semibold transition">
             Cancel
           </button>
-          <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-lg transition">
+          <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-600/20 transition">
             Confirm Merge
           </button>
         </div>
@@ -148,8 +166,6 @@
 
 {% block extra_scripts %}
 <script>
-  if (window.lucide) {
-    lucide.createIcons();
-  }
+  if (window.lucide) lucide.createIcons();
 </script>
 {% endblock %}
